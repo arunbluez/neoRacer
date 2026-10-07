@@ -48,10 +48,13 @@ export type AutoSettings = {
   route?: RouteSpec;
   /** Where the camera views from, to remember the orientation (0..3, null = automatic). */
   matRot: number | null;
+  /** Settings layout version (2: arcs became the default). */
+  version?: number;
 };
 
 export const DEFAULT_AUTO_SETTINGS: AutoSettings = {
-  style: 'spin',
+  // Follow the lane's curves (the turns have a radius); 'spin' turns on the spot.
+  style: 'arc',
   speedCmS: 22,
   curveSpeedCmS: 30,
   settleCm: 25,
@@ -72,6 +75,7 @@ export const DEFAULT_AUTO_SETTINGS: AutoSettings = {
   tickMs: 40,
   offTrackStopCm: 18,
   matRot: null,
+  version: 2,
 };
 
 export type CamFixIn = { t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number; raw?: { x: number; y: number }; conf?: number };

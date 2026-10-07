@@ -24,7 +24,8 @@ black (off the lane) stops the run.
    underglow cyan.
 3. Check the coloured route line lies on the lane. If it is turned, tap **Turn mat**.
 4. Place the robot on the start line, facing section a (towards side b).
-5. Pick the speed (start at the slowest, 22 cm/s, with **Spin on the spot** turns), tap
+5. Pick the speed (start at the slowest, 22 cm/s; turns follow the lane's curves, or pick
+   **Spin on the spot**), tap
    **Full screen**, then **Start**. STOP (or the header's STOP, or leaving the app) stops it.
 6. After the run: the summary shows the time and how far off the route each section was. Export
    the logs (**Export logs**) and send them over: the route and the tuning get corrected from them.

@@ -99,7 +99,8 @@ export function withDefaults(s: Partial<Settings> | undefined): Settings {
     ...DEFAULT_SETTINGS,
     ...(s ?? {}),
     drive: { ...DEFAULT_SETTINGS.drive, ...(s?.drive ?? {}) },
-    auto: { ...DEFAULT_SETTINGS.auto, ...(s?.auto ?? {}) },
+    // Version 2 made arc turns the default; settings saved before that switch over once.
+    auto: { ...DEFAULT_SETTINGS.auto, ...(s?.auto ?? {}), ...(s?.auto && (s.auto.version ?? 1) < 2 ? { style: 'arc' as const, version: 2 } : {}) },
     markerA: { ...DEFAULT_SETTINGS.markerA, ...(s?.markerA ?? {}) },
     markerB: { ...DEFAULT_SETTINGS.markerB, ...(s?.markerB ?? {}) },
     pollerPresets: s?.pollerPresets?.length ? s.pollerPresets : DEFAULT_POLLER_PRESETS,

@@ -137,4 +137,5 @@
   and cone offsets; estimator and motor model; closed-loop laps (`testing/simLap.ts`); two full
   camera-assisted laps through the mock link and rendered frames; the route on the venue photo.
 - docs/track.md: the track, its coordinates and the track code.
-
+- Turns follow the lane's curves by default ("Follow the curves"); spinning on the spot is the
+  option. Settings saved before switch over once.

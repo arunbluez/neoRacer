@@ -179,12 +179,12 @@ export function AutoScreen() {
         <label className="field">
           <span>Speed {s.speedCmS} cm/s {s.speedCmS <= 24 ? '(slowest)' : ''}</span>
           <input type="range" min={18} max={60} step={1} value={s.speedCmS} disabled={running} onChange={(e) => set({ speedCmS: Number(e.target.value) })} />
-          <small className="hint">The robot can't go slower than ~22 cm/s (its deadband). In arc turns it speeds up so the inner wheel keeps turning.</small>
+          <small className="hint">The robot can't go slower than ~22 cm/s (its deadband). In curves it speeds up so the inner wheel keeps turning: ~26 cm/s in the corners, ~33 cm/s in the zigzag's hairpins.</small>
         </label>
         <div className="row" style={{ gap: 6, marginBottom: 8 }}>
           <span>Turns</span>
+          <button className={`chip ${s.style === 'arc' ? 'chip-on' : ''}`} disabled={running} onClick={() => set({ style: 'arc' })}>Follow the curves</button>
           <button className={`chip ${s.style === 'spin' ? 'chip-on' : ''}`} disabled={running} onClick={() => set({ style: 'spin' })}>Spin on the spot</button>
-          <button className={`chip ${s.style === 'arc' ? 'chip-on' : ''}`} disabled={running} onClick={() => set({ style: 'arc' })}>Arcs</button>
         </div>
         <label className="row" style={{ marginBottom: 6, flexWrap: 'nowrap' }}>
           <input type="checkbox" checked={s.cameraAssist} disabled={running} onChange={(e) => set({ cameraAssist: e.target.checked })} />
