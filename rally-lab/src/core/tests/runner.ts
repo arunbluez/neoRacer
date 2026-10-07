@@ -182,6 +182,10 @@ export class TestRunner {
 
     run.data = data;
     run.tEnd = logger.now();
+    if (data && typeof data === 'object' && 'measuredBy' in data) {
+      const by = (data as { measuredBy: unknown }).measuredBy;
+      if (by === 'camera' || by === 'manual') run.measuredBy = by;
+    }
     if (data !== null && data !== undefined) {
       try {
         run.summary = def.summarize(data, params, { profile: this.deps.profile(), settings: this.deps.settings() });

@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "verify": "eslint . && tsc -b && vitest run"
   },
   "dependencies": {
     "dexie": "^4.4.6",

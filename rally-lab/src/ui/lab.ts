@@ -91,6 +91,8 @@ export async function initLab(): Promise<Lab> {
     ui: labUi,
   });
   const l = lab;
+  // Handy in chrome://inspect and for browser smoke tests.
+  if (import.meta.env.DEV) (window as unknown as { __lab?: Lab }).__lab = l;
   real.setLog((k, fields) => l.logger.log(k, fields));
   l.logger.log('app', { event: 'start', detail: { build: __BUILD_ID__, buildTime: __BUILD_TIME__, mode: import.meta.env.MODE } });
 

@@ -61,6 +61,8 @@ export class SimWorld {
   x: number;
   y: number;
   heading: number; // degrees, mat coordinates (0 = +x, 90 = +y)
+  /** Total absolute rotation since the last place(), degrees (for tests). */
+  totalTurnDeg = 0;
   cmdL = 0;
   cmdR = 0;
   vl = 0;
@@ -91,6 +93,7 @@ export class SimWorld {
     this.y = y;
     this.heading = headingDeg;
     this.vl = this.vr = 0;
+    this.totalTurnDeg = 0;
   }
 
   setMotors(l: number, r: number, t: number): void {
@@ -126,6 +129,7 @@ export class SimWorld {
       this.x += (v * Math.cos(th) * h) / 1000;
       this.y += (v * Math.sin(th) * h) / 1000;
       this.heading = (((this.heading + (omega * h) / 1000) % 360) + 360) % 360;
+      this.totalTurnDeg += Math.abs((omega * h) / 1000);
       this.ax = ((this.vl + this.vr - vl0 - vr0) / 2 / (h / 1000)) / 981; // g, forward
       this.ay = ((v * omega * Math.PI) / 180) / 981; // g, centripetal
       dt -= h;

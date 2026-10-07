@@ -191,7 +191,7 @@ canvas.spark { width: 100%; height: 48px; display: block; }
 .progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }
 
 /* Drive */
-.joystick { position: relative; width: 100%; aspect-ratio: 1; max-width: 420px; margin: 0 auto; touch-action: none; user-select: none; }
+.joystick { position: relative; width: 100%; aspect-ratio: 1; max-width: 340px; margin: 0 auto; touch-action: none; user-select: none; }
 .joystick-base { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, #1c2633 0%, #11161d 70%); border: 2px solid var(--line); }
 .joystick-knob { position: absolute; width: 30%; height: 30%; border-radius: 50%; background: var(--accent); opacity: 0.9; transform: translate(-50%, -50%); box-shadow: 0 2px 12px #0009; }
 .joystick-active .joystick-base { border-color: var(--accent); }

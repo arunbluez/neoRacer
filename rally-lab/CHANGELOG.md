@@ -34,3 +34,19 @@
   `session.zip` (session.json, events.jsonl, report.md, images/).
 - Tests: end-to-end T1.1, T1.2, T1.3, T1.4, T1.5, T1.6, T2.1 and STOP against the mock; report
   snapshot; zip contents.
+
+## M2 — Drive and motion tests (2026-10-07)
+
+- Drive screen: virtual joystick with arcade mixing to `MS,l,r`, speed cap, expo, trim (saved to
+  the robot profile, applied to the right wheel), tilt mode with a hold-to-drive button, dead-man
+  (lifting the finger sends S), vibration on send failures and disconnects, live line-sensor
+  overlay, lap timer (laps logged as notes). Sends at the write gap, only on change plus a 300 ms
+  keepalive, so queries still get through; every send is logged as an `input` event.
+- Motion tests T3.1 deadband, T3.2 straight speed (speed table and trim suggestion), T3.3 start
+  and stop, T3.4 spin rate, T3.5 arcs (radius, speed, effective track width), T3.6 battery check.
+  Each uses camera tracking when it is running and asks for tape-measure entry otherwise.
+- Portable `model/drive.ts` (mixing, expo, trim, tilt) and `model/fits.ts` (circle fit, steady
+  speed, along/sideways split, trim from drift, track width from arcs).
+- Tests: drive mixing and fits; T3.1, T3.2, T3.4, T3.5 end to end against the simulated robot with
+  a simulated tester entering true measurements (recovers the sim's deadband, right-wheel
+  mismatch and track width).
