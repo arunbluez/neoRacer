@@ -143,7 +143,7 @@ class CameraController implements CameraControl {
       for (const cb of this.frameListeners) cb(f);
     });
     lab.camera = this;
-    lab.logger.log('app', { event: 'camera', detail: { started: src.label, deviceId: src.deviceId, settings: src.settings() } });
+    lab.logger.log('app', { event: 'camera', detail: { started: src.label, deviceId: src.deviceId, settings: src.settings(), capabilities: src.capabilities() } });
     if (deviceId !== 'sim' && deviceId) void lab.setSettings({ cameraId: deviceId });
     this.fpsTimer = setInterval(() => {
       const now = clock.now();

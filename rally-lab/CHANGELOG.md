@@ -139,3 +139,19 @@
 - docs/track.md: the track, its coordinates and the track code.
 - Turns follow the lane's curves by default ("Follow the curves"); spinning on the spot is the
   option. Settings saved before switch over once.
+
+## Auto run, first field feedback (2026-10-07)
+
+- The track is found by its lane, not the mat's outline (`vision/laneFit.ts`): lane-coloured
+  pixels, their edges, and a robust homography fit with edge polarity (outer edges can't lock onto
+  inner ones), started from the last frame, the lane band's straight outer edges, the mat outline
+  and restarts. Works with dark clothes, bags and chairs against the mat (the outline finder merged
+  them in), and without the mat's edges in view, so the phone can be closer; best from a long side.
+  Checked on a frame from the venue.
+- All four lights in one colour (green, cyan or yellow); the robot is searched only near where it
+  should be (the start line, where the blink test found it, the estimate during a run), so other
+  robots' lights don't count. **Find my robot** blinks the lights and picks the light that blinked
+  along (`vision/blinkFinder.ts`); Start runs it when needed.
+- Full screen: big Close, Find my robot and Re-detect track buttons. The camera's zoom range is
+  shown and logged (no ultra-wide on phones where Chrome offers only one back camera).
+

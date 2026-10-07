@@ -1,228 +1,218 @@
 // Robot tracking with a hand-held phone: no fixed calibration. Every frame the
-// mat is found again (matFinder), its corners keep their identity from frame
-// to frame, the frame's own homography maps the robot's lights onto the mat,
-// and the lights' height above the mat is corrected using the camera position
-// worked out from the same homography.
+// track is found again by its painted lane (laneFit: works in a busy hall and
+// needs only the track in view, not the whole mat), the frame's own
+// homography maps the robot's lights onto the mat, and the lights' height
+// above the mat is corrected using the camera position worked out from the
+// same homography. Only lights near where our robot should be count (other
+// robots on the track carry lights too): near the start line before a run,
+// near the estimate during one, or where the blink test found it.
 
 import type { Frame } from '../types';
+import { findBlobs, thresholdMarker, type Rect } from './blob';
 import type { MarkerColor } from './color';
-import { applyH, mat3Inv, type Mat3, type Pt } from './linalg';
-import { findMat, matchCorners, quadToMat, type MatQuad, type Quad } from './matFinder';
-import { bestOrientation, cameraPose, cmPerPxAt, correctParallax, orientationScore, type BandGrid, type CameraPose } from './matView';
-import { Tracker, type TrackResult } from './tracker';
+import { applyH, type Mat3, type Pt } from './linalg';
+import { fitTrack, laneFrame, matCornersOf, type FitResult, type LaneModel } from './laneFit';
+import { findMat, type Quad } from './matFinder';
+import { cameraPose, cmPerPxAt, correctParallax, type CameraPose } from './matView';
 
 export type HandheldConfig = {
-  grid: BandGrid;
-  markerA: MarkerColor;
-  markerB?: MarkerColor;
+  model: LaneModel;
+  marker: MarkerColor;
   minAreaPx: number;
-  /** Mat finder working width (px). */
+  /** Lane-fit working width, px. */
   workWidth?: number;
-  /** Height of marker A (headlights) and marker B (underglow) above the mat, cm. */
-  headHeightCm: number;
-  ugHeightCm: number;
-  /** Which way round the mat is (frame corner of mat corner 0, in the finder's order); null = work it out. */
-  rot?: number | null;
-  /** Keep using the last mat this long when a frame doesn't show it, ms. */
+  /** Height of the marker lights above the mat, cm. */
+  markerHeightCm: number;
+  /** Keep using the last fit this long when a frame doesn't give one, ms. */
   holdMatMs?: number;
 };
 
 export type CamFix = {
   /** Frame capture time, ms. */
   t: number;
-  /** Marker A's ground point, mat cm (parallax corrected). */
+  /** The marker's ground point, mat cm (parallax corrected). */
   x: number;
   y: number;
-  /** B → A, when both markers were seen. */
+  /** Not measured in this mode (one colour for all lights). */
   headingDeg: number | null;
   /** As seen, before the parallax correction. */
   raw: Pt;
   conf: number;
   /** How coarse the view is at the robot, cm per pixel. */
   cmPerPx: number;
+  /** Image position, frame px. */
+  px: Pt;
 };
+
+/** Where to look for our robot: a circle on the mat (ground cm). */
+export type Gate = { center: Pt; radiusCm: number };
+
+export type Blob = { x: number; y: number; raw: Pt; px: Pt; area: number };
 
 export type HandheldFrame = {
   t: number;
-  /** This frame's mat detection. */
-  mat?: MatQuad;
-  /** Mat corners in use, in mat order (corner i = mat corner i: TL, TR, BR, BL). */
+  fit?: FitResult;
+  /** Mat corners in frame px (TL, TR, BR, BL), from the fit. */
   corners?: Quad;
-  /** Frame px → mat cm. */
+  /** Frame px → mat cm, and back. */
   H?: Mat3;
-  /** Age of the mat in use (0 = found in this frame), ms. */
+  G?: Mat3;
+  /** Age of the fit in use (0 = this frame), ms. */
   matAgeMs: number;
-  rot: number | null;
-  rotScores?: number[];
+  /** Which side of the mat the phone is on: b (near end), c, d, a/g. */
+  side: string | null;
   cam?: CameraPose;
   fix?: CamFix;
-  track?: TrackResult;
+  /** Lights seen inside the gate (or anywhere without one). */
+  blobs: number;
+  gate?: Gate;
   procMs: number;
 };
 
-const ROT_VOTES_TO_LOCK = 4;
+export const SIDES: Record<string, string> = { b: 'b (near end)', c: 'c (bridge side)', d: 'd (far end)', a: 'a/g (start side)' };
+
+/** The mat side the camera stands at, from its position. */
+export function sideOf(cam: Pick<CameraPose, 'x' | 'y'>, w: number, h: number): string {
+  const ex = { b: cam.y - h, c: cam.x - w, d: -cam.y, a: -cam.x };
+  let best: keyof typeof ex = 'b';
+  for (const k of Object.keys(ex) as (keyof typeof ex)[]) if (ex[k] > ex[best]) best = k;
+  return best;
+}
 
 export class HandheldTracker {
   private cfg: HandheldConfig;
-  private tracker?: Tracker;
-  private frameW = 0;
-  private frameH = 0;
-  /** Corners in mat order, and when they were last seen. */
-  private matCorners?: Quad;
-  private matT = -Infinity;
-  private votes = [0, 0, 0, 0];
-  private sinceCheck = 0;
-  private lastMat?: MatQuad;
-  rot: number | null;
-  rotScores?: number[];
-  /** Why the last frame had no mat (for the status line). */
+  private G?: Mat3;
+  private H?: Mat3;
+  private fitT = -Infinity;
+  private lastFit?: FitResult;
+  private forceFull = true;
+  /** Why the last frame had no track (for the status line). */
   lastReject = '';
 
   constructor(cfg: HandheldConfig) {
     this.cfg = cfg;
-    this.rot = cfg.rot ?? null;
   }
 
   configure(patch: Partial<HandheldConfig>): void {
     this.cfg = { ...this.cfg, ...patch };
-    if ('rot' in patch) this.setRot(patch.rot ?? null);
-    if ('markerA' in patch || 'markerB' in patch || 'minAreaPx' in patch) this.tracker = undefined;
   }
 
-  /** Fix the orientation (null: work it out again). Re-labels the current corners. */
-  setRot(rot: number | null): void {
-    this.votes = [0, 0, 0, 0];
-    if (rot === null) {
-      this.rot = null;
-      this.matCorners = undefined;
-      return;
-    }
-    const r = ((rot % 4) + 4) % 4;
-    if (this.lastMat) this.matCorners = rotate(this.lastMat.corners, r);
-    this.rot = r;
+  /** Search from scratch on the next frame. */
+  redetect(): void {
+    this.forceFull = true;
   }
 
-  /** Turn the mat a quarter (when the automatic choice is wrong). */
-  rotateBy(k: number): void {
-    if (this.matCorners) this.matCorners = rotate(this.matCorners, k);
-    this.rot = ((this.rot ?? 0) + k + 4) % 4;
-    this.votes = [0, 0, 0, 0];
+  /** The fit's homography for a frame time, if fresh enough. */
+  current(t: number): { H: Mat3; G: Mat3 } | null {
+    return this.H && this.G && t - this.fitT <= (this.cfg.holdMatMs ?? 500) ? { H: this.H, G: this.G } : null;
   }
 
-  /**
-   * One frame. hintMat: where marker A's ground point is expected (mat cm),
-   * which keeps the search on the robot while the phone moves.
-   */
-  process(frame: Frame, now: () => number, hintMat?: Pt): HandheldFrame {
+  /** One frame. gate: where our robot can be (mat cm, ground); none = anywhere on the mat. */
+  process(frame: Frame, now: () => number, gate?: Gate): HandheldFrame {
     const t0 = now();
     const t = frame.tCaptureMs;
-    const out: HandheldFrame = { t, matAgeMs: Infinity, rot: this.rot, procMs: 0 };
-    const mat = findMat(frame, { workWidth: this.cfg.workWidth ?? 200, prev: this.lastMat?.corners, onReject: (r) => (this.lastReject = r) });
-    if (mat) {
-      out.mat = mat;
-      this.lastMat = mat;
-      this.lastReject = '';
-      this.updateCorners(frame, mat, t);
+    const out: HandheldFrame = { t, matAgeMs: Infinity, side: null, blobs: 0, gate, procMs: 0 };
+    const m = this.cfg.model;
+    const lf = laneFrame(frame, this.cfg.workWidth ?? 320);
+    const tracking = !this.forceFull && this.G && t - this.fitT < 600;
+    let matQuad: Quad | undefined;
+    if (!tracking) {
+      const mq = findMat(frame);
+      if (mq && !mq.touchesBorder) matQuad = mq.corners;
     }
-    out.rot = this.rot;
-    out.rotScores = this.rotScores;
-    const hold = this.cfg.holdMatMs ?? 400;
-    if (this.matCorners && t - this.matT <= hold && this.rot !== null) {
-      out.corners = this.matCorners;
-      out.matAgeMs = t - this.matT;
-      const g = this.cfg.grid;
-      const H = quadToMat(this.matCorners, 0, g.matWidthCm, g.matHeightCm);
-      out.H = H;
-      const cam = cameraPose(H, frame.width, frame.height);
-      if (cam) out.cam = cam;
-      this.trackRobot(frame, H, cam ?? undefined, out, hintMat);
+    const fit = fitTrack(frame, m, { prev: tracking ? this.G : undefined, matQuad, full: !tracking }, lf);
+    if (fit) {
+      this.G = fit.G;
+      this.H = fit.H;
+      this.fitT = t;
+      this.lastFit = fit;
+      this.forceFull = false;
+      this.lastReject = '';
+      out.fit = fit;
+    } else {
+      this.lastReject = lf.edges < 30 ? 'no lane in view' : 'lane does not fit';
+    }
+    const cur = this.current(t);
+    if (cur) {
+      out.H = cur.H;
+      out.G = cur.G;
+      out.matAgeMs = t - this.fitT;
+      out.corners = matCornersOf(cur.G, m.matWidthCm, m.matHeightCm);
+      const cam = cameraPose(cur.H, frame.width, frame.height);
+      if (cam) {
+        out.cam = cam;
+        out.side = sideOf(cam, m.matWidthCm, m.matHeightCm);
+      }
+      const blobs = this.blobs(frame, cur, cam ?? undefined, gate);
+      out.blobs = blobs.length;
+      // Ours: the nearest to the gate's centre, else the biggest.
+      const pick = gate
+        ? blobs.reduce<Blob | undefined>((b, x) => (!b || Math.hypot(x.x - gate.center.x, x.y - gate.center.y) < Math.hypot(b.x - gate.center.x, b.y - gate.center.y) ? x : b), undefined)
+        : blobs.reduce<Blob | undefined>((b, x) => (!b || x.area > b.area ? x : b), undefined);
+      if (pick) {
+        out.fix = {
+          t, x: pick.x, y: pick.y, headingDeg: null, raw: pick.raw, px: pick.px,
+          conf: Math.min(1, pick.area / (pick.area + 2 * this.cfg.minAreaPx)), cmPerPx: cmPerPxAt(cur.H, pick),
+        };
+      }
     }
     out.procMs = now() - t0;
     return out;
   }
 
-  private updateCorners(frame: Frame, mat: MatQuad, t: number): void {
-    const g = this.cfg.grid;
-    const recent = this.matCorners && t - this.matT < 1000;
-    if (this.rot === null) {
-      // Not known yet: vote over a few frames for the way round that matches the lane pattern.
-      const best = bestOrientation(frame, mat.corners, g, mat.threshold);
-      this.rotScores = best.scores;
-      const second = Math.max(...best.scores.filter((_, i) => i !== best.rot));
-      if (best.score > 0.72 && best.score - second > 0.06) this.votes[best.rot]++;
-      const lead = this.votes.indexOf(Math.max(...this.votes));
-      if (this.votes[lead] >= ROT_VOTES_TO_LOCK) {
-        this.rot = lead;
-        this.matCorners = rotate(mat.corners, lead);
-        this.matT = t;
-      }
-      return;
-    }
-    if (recent) {
-      this.matCorners = matchCorners(this.matCorners!, mat.corners);
-    } else {
-      this.matCorners = rotate(mat.corners, this.rot);
-    }
-    this.matT = t;
-    // Now and then, check the labels still fit the lane pattern; switch when
-    // another way round fits clearly better (the mat was lost and found turned).
-    if (++this.sinceCheck >= 15) {
-      this.sinceCheck = 0;
-      const cur = mat.corners.indexOf(this.matCorners[0]);
-      if (cur < 0) return;
-      this.rot = cur;
-      const s = orientationScore(frame, mat.corners, cur, g, mat.threshold);
-      this.rotScores = [0, 1, 2, 3].map((r) => (r === cur ? s : NaN));
-      if (s < 0.65) {
-        const best = bestOrientation(frame, mat.corners, g, mat.threshold);
-        this.rotScores = best.scores;
-        if (best.rot !== cur && best.score > s + 0.15) {
-          this.rot = best.rot;
-          this.matCorners = rotate(mat.corners, best.rot);
-          this.switched++;
-        }
+  /**
+   * Marker-coloured lights on the mat (inside the gate when given), lights
+   * within 8 cm of each other merged (one robot's four LEDs).
+   */
+  blobs(frame: Frame, cur: { H: Mat3; G: Mat3 }, cam: CameraPose | undefined, gate?: Gate): Blob[] {
+    const m = this.cfg.model;
+    let win: Rect = { x0: 0, y0: 0, x1: frame.width, y1: frame.height };
+    if (gate) {
+      // The gate's box in the frame (seen positions are pushed away from the camera: widen a little).
+      const r = gate.radiusCm * 1.3 + 4;
+      const c = gate.center;
+      const pts = [{ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y - r }, { x: c.x + r, y: c.y + r }, { x: c.x - r, y: c.y + r }]
+        .map((p) => applyH(cur.G, p)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (pts.length === 4) {
+        win = {
+          x0: Math.max(0, Math.min(...pts.map((p) => p.x)) - 6), y0: Math.max(0, Math.min(...pts.map((p) => p.y)) - 6),
+          x1: Math.min(frame.width, Math.max(...pts.map((p) => p.x)) + 6), y1: Math.min(frame.height, Math.max(...pts.map((p) => p.y)) + 6),
+        };
       }
     }
+    if (win.x1 <= win.x0 || win.y1 <= win.y0) return [];
+    const mask = thresholdMarker(frame, this.cfg.marker, win, this.maskBuf);
+    this.maskBuf = mask;
+    const raw = findBlobs(mask, frame.width, frame.height, this.cfg.minAreaPx, win, 40);
+    const seen = raw.map((b) => {
+      const r = applyH(cur.H, { x: b.cx, y: b.cy });
+      const g = cam ? correctParallax(r, cam, this.cfg.markerHeightCm) : r;
+      return { x: g.x, y: g.y, raw: r, px: { x: b.cx, y: b.cy }, area: b.area };
+    }).filter((b) => Number.isFinite(b.x) && b.x > -10 && b.y > -10 && b.x < m.matWidthCm + 10 && b.y < m.matHeightCm + 10);
+    // merge lights within 8 cm (biggest first)
+    seen.sort((a, b) => b.area - a.area);
+    const merged: Blob[] = [];
+    for (const s of seen) {
+      const host = merged.find((g) => Math.hypot(g.x - s.x, g.y - s.y) < 8);
+      if (!host) {
+        merged.push({ ...s, raw: { ...s.raw }, px: { ...s.px } });
+        continue;
+      }
+      const a = host.area + s.area;
+      for (const k of ['x', 'y'] as const) {
+        host[k] = (host[k] * host.area + s[k] * s.area) / a;
+        host.raw[k] = (host.raw[k] * host.area + s.raw[k] * s.area) / a;
+        host.px[k] = (host.px[k] * host.area + s.px[k] * s.area) / a;
+      }
+      host.area = a;
+    }
+    return gate ? merged.filter((b) => Math.hypot(b.x - gate.center.x, b.y - gate.center.y) <= gate.radiusCm) : merged;
   }
 
-  /** Times the orientation was switched by the periodic check. */
-  switched = 0;
+  private maskBuf?: Uint8Array;
 
-  private trackRobot(frame: Frame, H: Mat3, cam: CameraPose | undefined, out: HandheldFrame, hintMat?: Pt): void {
-    const cfg = this.cfg;
-    if (!this.tracker || frame.width !== this.frameW || frame.height !== this.frameH) {
-      this.frameW = frame.width;
-      this.frameH = frame.height;
-      this.tracker = new Tracker({
-        H,
-        markerA: cfg.markerA,
-        markerB: cfg.markerB,
-        minAreaPx: cfg.minAreaPx,
-        searchRadiusPx: Math.round(frame.width / 10),
-        predictMs: 0,
-        matWidthCm: cfg.grid.matWidthCm,
-        matHeightCm: cfg.grid.matHeightCm,
-      });
-    }
-    let hintA: Pt | undefined;
-    if (hintMat) {
-      const seen = cam ? unParallax(hintMat, cam, cfg.headHeightCm) : hintMat;
-      const inv = mat3Inv(H);
-      const p = inv ? applyH(inv, seen) : undefined;
-      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) hintA = p;
-    }
-    const res = this.tracker.process(frame, { H, hintA });
-    out.track = res;
-    if (!res.raw || !res.a) return;
-    const rawA = { x: res.raw.xCm, y: res.raw.yCm };
-    const a = cam ? correctParallax(rawA, cam, cfg.headHeightCm) : rawA;
-    let headingDeg: number | null = null;
-    if (res.b) {
-      const rawB = applyH(H, { x: res.b.cx, y: res.b.cy });
-      const b = cam ? correctParallax(rawB, cam, cfg.ugHeightCm) : rawB;
-      if (Math.hypot(a.x - b.x, a.y - b.y) > 1) headingDeg = (Math.atan2(a.y - b.y, a.x - b.x) * 180) / Math.PI;
-    }
-    out.fix = { t: out.t, x: a.x, y: a.y, headingDeg, raw: rawA, conf: res.raw.conf, cmPerPx: cmPerPxAt(H, a) };
+  get fit(): FitResult | undefined {
+    return this.lastFit;
   }
 }
 
@@ -233,7 +223,3 @@ export function unParallax(g: Pt, cam: Pick<CameraPose, 'x' | 'y' | 'height'>, h
   return { x: cam.x + (g.x - cam.x) / k, y: cam.y + (g.y - cam.y) / k };
 }
 
-function rotate(q: Quad, k: number): Quad {
-  const r = ((k % 4) + 4) % 4;
-  return [q[r], q[(r + 1) % 4], q[(r + 2) % 4], q[(r + 3) % 4]];
-}

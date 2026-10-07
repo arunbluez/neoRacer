@@ -35,12 +35,14 @@ export type AutoSettings = {
   lineGuard: boolean;
   lineHz: number;
   cmdLatencyMs: number;
-  /** Marker A (headlights) ahead of the axle, and the lights' heights above the mat, cm. */
+  /**
+   * All four lights (headlights and underglow) in one colour: the camera sees
+   * one bright patch. Where its centre is: ahead of the wheel axle, and
+   * height above the mat, cm.
+   */
   markerAheadCm: number;
-  headHeightCm: number;
-  ugHeightCm: number;
-  headlights: Rgb;
-  underglow: Rgb;
+  markerHeightCm: number;
+  lightColor: Rgb;
   tickMs: number;
   /** Stop when the camera shows the robot this far off the path for half a second (0 = never). */
   offTrackStopCm: number;
@@ -48,7 +50,7 @@ export type AutoSettings = {
   route?: RouteSpec;
   /** Where the camera views from, to remember the orientation (0..3, null = automatic). */
   matRot: number | null;
-  /** Settings layout version (2: arcs became the default). */
+  /** Settings layout version (2: arcs became the default; 3: one light colour). */
   version?: number;
 };
 
@@ -67,16 +69,34 @@ export const DEFAULT_AUTO_SETTINGS: AutoSettings = {
   lineGuard: true,
   lineHz: 12,
   cmdLatencyMs: 25,
-  markerAheadCm: 5.5,
-  headHeightCm: 3,
-  ugHeightCm: 1,
-  headlights: { r: 0, g: 255, b: 0 },
-  underglow: { r: 0, g: 255, b: 255 },
+  markerAheadCm: 3,
+  markerHeightCm: 1.5,
+  lightColor: { r: 0, g: 255, b: 0 },
   tickMs: 40,
   offTrackStopCm: 18,
   matRot: null,
-  version: 2,
+  version: 3,
 };
+
+/** Where the camera should look for our robot: a circle on the mat (ground cm). */
+export type TrackGate = { center: { x: number; y: number }; radiusCm: number; why: 'run' | 'blink' | 'start' };
+
+/**
+ * During a run: around the estimate (wider when it is unsure). Before it:
+ * where the blink test found the robot (for two minutes), else the start line.
+ */
+export function trackingGate(o: {
+  auto?: AutoRun; identified?: { x: number; y: number; t: number } | null; now: number; route: RouteSpec; markerAheadCm: number;
+}): TrackGate {
+  if (o.auto?.state === 'running') {
+    const c = o.auto.hint()!;
+    return { center: c, radiusCm: Math.min(40, 15 + 2 * o.auto.est.pose.sigmaCm), why: 'run' };
+  }
+  if (o.identified && o.now - o.identified.t < 120_000) return { center: { x: o.identified.x, y: o.identified.y }, radiusCm: 12, why: 'blink' };
+  const st = o.route.start;
+  const th = (st.headingDeg * Math.PI) / 180;
+  return { center: { x: st.x + o.markerAheadCm * Math.cos(th), y: st.y + o.markerAheadCm * Math.sin(th) }, radiusCm: 30, why: 'start' };
+}
 
 export type CamFixIn = { t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number; raw?: { x: number; y: number }; conf?: number };
 
@@ -157,10 +177,15 @@ export class AutoRun {
     });
   }
 
-  /** Turn the marker lights on (the camera looks for them). */
-  static lightsOn(link: Pick<RobotLink, 'send'>, s: Pick<AutoSettings, 'headlights' | 'underglow'>): void {
-    void link.send(rgbCmd('HL', s.headlights));
-    void link.send(rgbCmd('UG', s.underglow));
+  /** All four lights on in the marker colour (the camera looks for them). */
+  static lightsOn(link: Pick<RobotLink, 'send'>, s: Pick<AutoSettings, 'lightColor'>): void {
+    void link.send(rgbCmd('HL', s.lightColor));
+    void link.send(rgbCmd('UG', s.lightColor));
+  }
+
+  /** HO switches off the headlights and the underglow. */
+  static lightsOff(link: Pick<RobotLink, 'send'>): void {
+    void link.send('HO');
   }
 
   /** The robot's starting pose: from a recent camera fix near the start line, else the route's start. */

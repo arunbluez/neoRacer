@@ -2,9 +2,9 @@
 // camera picture, and a top-down map of the mat.
 
 import { useRef } from 'react';
-import type { AutoRun } from '../../core/race/autoRun';
+import type { AutoRun, TrackGate } from '../../core/race/autoRun';
 import type { Plan, RouteSpec } from '../../core/race/route';
-import { applyH, mat3Inv, type Pt } from '../../core/vision/linalg';
+import { applyH, type Pt } from '../../core/vision/linalg';
 import type { HandheldFrame } from '../../core/vision/handheld';
 import { useAnimationFrame } from '../hooks';
 import { dot, polyline } from '../camera/views';
@@ -14,21 +14,13 @@ const SECTION_COLORS = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#b388ff', '
 /** Overlay on the live picture (frame pixels × scale). */
 export function drawLiveOverlay(
   g: CanvasRenderingContext2D, scale: number, last: HandheldFrame | undefined, plan: Plan, route: RouteSpec, auto: AutoRun | undefined,
+  gate?: TrackGate,
 ): void {
-  if (!last) return;
-  if (last.mat && !last.corners) {
-    // Mat found, orientation not settled yet.
-    polyline(g, last.mat.corners, scale, '#ffd166', true, 2);
-  }
-  if (!last.corners || !last.H) return;
+  if (!last?.corners || !last.H || !last.G) return;
   const fresh = last.matAgeMs === 0;
-  polyline(g, last.corners, scale, fresh ? '#06d6a0' : '#ffb347', true, fresh ? 2 : 1);
-  const inv = mat3Inv(last.H);
-  if (!inv) return;
-  const toImg = (p: Pt) => applyH(inv, p);
-  // corner 0 marker: the mat's top-left as the app sees it
-  const c0 = last.corners[0];
-  dot(g, c0.x * scale, c0.y * scale, 5, '#06d6a0', 'TL');
+  polyline(g, last.corners, scale, fresh ? 'rgba(6,214,160,0.7)' : 'rgba(255,179,71,0.7)', true, 1);
+  const G = last.G;
+  const toImg = (p: Pt) => applyH(G, p);
   // the route, coloured by section
   const pts = plan.outline;
   let cur: Pt[] = [];
@@ -53,12 +45,21 @@ export function drawLiveOverlay(
     const q = toImg(p);
     dot(g, q.x * scale, q.y * scale, 4, '#fff', s.id);
   }
-  // start line
   const st = toImg(route.start);
   dot(g, st.x * scale, st.y * scale, 5, '#ffffff', 'start');
+  // where we look for our robot
+  if (gate) {
+    const c = gate.center;
+    const ring: Pt[] = [];
+    for (let k = 0; k <= 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      ring.push(toImg({ x: c.x + gate.radiusCm * Math.cos(a), y: c.y + gate.radiusCm * Math.sin(a) }));
+    }
+    polyline(g, ring, scale, gate.why === 'blink' ? 'rgba(0,255,102,0.9)' : 'rgba(255,255,255,0.6)', true, 1.5);
+  }
   // the robot as the camera sees it
-  if (last.track?.a) dot(g, last.track.a.cx * scale, last.track.a.cy * scale, 6, 'rgba(0,255,0,0.6)');
   if (last.fix) {
+    dot(g, last.fix.px.x * scale, last.fix.px.y * scale, 7, 'rgba(0,255,0,0.55)');
     const q = toImg(last.fix);
     dot(g, q.x * scale, q.y * scale, 4, '#00ff66');
   }

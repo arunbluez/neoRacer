@@ -6,15 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { drive, makeLab } from '../testing/labHarness';
 import { PUGUZ_PROFILE, PUGUZ_SIM } from '../testing/simLap';
 import { CUTEBOT_LOOK, drawSimRobot, HANDHELD_AT_B, HandShake, projector, renderMatView } from '../sim/camera';
-import { makeSyntheticTrack, nearestOnPath, pathLengths } from '../sim/track';
+import { makeSyntheticTrack, nearestOnPath, paintedRoute, pathLengths } from '../sim/track';
 import { defaultMarkerColor } from '../vision/color';
 import { HandheldTracker } from '../vision/handheld';
-import { bandGrid } from '../vision/matView';
-import { AutoRun, DEFAULT_AUTO_SETTINGS, type AutoSettings } from './autoRun';
+import { laneModel } from '../vision/laneFit';
+import { AutoRun, DEFAULT_AUTO_SETTINGS, trackingGate, type AutoSettings } from './autoRun';
+import { buildPlan, RALLY_ROUTE } from './route';
 
 const track = makeSyntheticTrack({ cmPerPx: 0.5 });
 const { cum, total } = pathLengths(track.centerline);
-const grid = bandGrid(track.centerline, 11, 200, 300, 4);
+const model = laneModel(buildPlan(paintedRoute(RALLY_ROUTE), 'arc').outline, 9, 200, 300, 2);
 
 async function lap(settings: Partial<AutoSettings>, camera = true) {
   const { lab, mock, clock, store } = await makeLab({ withTrack: true });
@@ -23,10 +24,7 @@ async function lap(settings: Partial<AutoSettings>, camera = true) {
   const s: AutoSettings = { ...DEFAULT_AUTO_SETTINGS, ...settings };
   const auto = lab.createAuto(s);
   AutoRun.lightsOn(lab.link, s);
-  const tracker = new HandheldTracker({
-    grid, markerA: defaultMarkerColor(s.headlights), markerB: defaultMarkerColor(s.underglow), minAreaPx: 3,
-    headHeightCm: CUTEBOT_LOOK.headHeight, ugHeightCm: CUTEBOT_LOOK.ugHeight,
-  });
+  const tracker = new HandheldTracker({ model, marker: defaultMarkerColor(s.lightColor), minAreaPx: 3, markerHeightCm: s.markerHeightCm });
   const shake = new HandShake(HANDHELD_AT_B, 1, 11);
   let worst = 0, frames = 0, fixes = 0;
   let worstAt = { x: 0, y: 0, sec: '' };
@@ -46,7 +44,8 @@ async function lap(settings: Partial<AutoSettings>, camera = true) {
     const proj = projector(shake.at(tCap), 480, 360);
     const img = renderMatView(track.image, 200, 300, proj);
     drawSimRobot(img, proj, truth, w.lightsAt(tCap), CUTEBOT_LOOK, [track.bridge]);
-    const out = tracker.process({ ...img, tCaptureMs: tCap }, () => clock.now(), auto.hint());
+    const gate = trackingGate({ auto, now: clock.now(), route: RALLY_ROUTE, markerAheadCm: s.markerAheadCm });
+    const out = tracker.process({ ...img, tCaptureMs: tCap }, () => clock.now(), gate);
     frames++;
     if (out.fix) {
       fixes++;

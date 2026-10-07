@@ -100,9 +100,24 @@ export function withDefaults(s: Partial<Settings> | undefined): Settings {
     ...(s ?? {}),
     drive: { ...DEFAULT_SETTINGS.drive, ...(s?.drive ?? {}) },
     // Version 2 made arc turns the default; settings saved before that switch over once.
-    auto: { ...DEFAULT_SETTINGS.auto, ...(s?.auto ?? {}), ...(s?.auto && (s.auto.version ?? 1) < 2 ? { style: 'arc' as const, version: 2 } : {}) },
+    auto: migrateAuto(s?.auto),
     markerA: { ...DEFAULT_SETTINGS.markerA, ...(s?.markerA ?? {}) },
     markerB: { ...DEFAULT_SETTINGS.markerB, ...(s?.markerB ?? {}) },
     pollerPresets: s?.pollerPresets?.length ? s.pollerPresets : DEFAULT_POLLER_PRESETS,
   };
 }
+
+/** Stored auto settings from older versions: 2 made arcs the default, 3 moved to one light colour. */
+function migrateAuto(a: Partial<AutoSettings> | undefined): AutoSettings {
+  const out = { ...DEFAULT_SETTINGS.auto, ...(a ?? {}) };
+  const v = a ? (a.version ?? 1) : DEFAULT_SETTINGS.auto.version ?? 3;
+  if (v < 2) out.style = 'arc';
+  if (v < 3) {
+    out.markerAheadCm = DEFAULT_SETTINGS.auto.markerAheadCm;
+    out.markerHeightCm = DEFAULT_SETTINGS.auto.markerHeightCm;
+    out.lightColor = DEFAULT_SETTINGS.auto.lightColor;
+  }
+  out.version = DEFAULT_SETTINGS.auto.version;
+  return out;
+}
+

@@ -13,38 +13,45 @@ the tripod Camera) are behind Data → Settings → **Lab tools**.
 ## Auto run (camera assisted)
 
 The robot drives a hard-coded route (the [track code](../docs/track.md)). The phone camera finds
-the mat in every frame, so the phone can be held by hand; it finds the robot's lights, and the
-app corrects the robot when it drifts from the route. The line sensors are a last guard: both
-black (off the lane) stops the run.
+the **track by its coloured lane** in every frame (so the phone can be held by hand, people and
+bags around the mat don't matter, and the mat's black edges don't need to be in view), finds
+**your robot by its lights** (all four set to one colour, blinked to tell it from other robots),
+and the app corrects the robot when it drifts from the route. The line sensors are a last guard:
+both black (off the lane) stops the run.
 
-1. Connect the robot. Stand behind one end of the mat (side b, the near straight, is the default
-   view) and hold the phone **in landscape**, high enough that the **whole mat** is in the picture.
-2. Auto → **Start camera**. The badges show `mat ✓` (and which side you are looking from) and
-   `robot ✓`. Tap **Lights on** if the robot isn't seen: the headlights go green and the
-   underglow cyan.
-3. Check the coloured route line lies on the lane. If it is turned, tap **Turn mat**.
-4. Place the robot on the start line, facing section a (towards side b).
-5. Pick the speed (start at the slowest, 22 cm/s; turns follow the lane's curves, or pick
-   **Spin on the spot**), tap
-   **Full screen**, then **Start**. STOP (or the header's STOP, or leaving the app) stops it.
-6. After the run: the summary shows the time and how far off the route each section was. Export
+1. Connect the robot. Stand at a **long side** of the mat (the bridge side or the start side: the
+   3 m length then runs across the picture and you can stand close), hold the phone **in
+   landscape** and high, with the whole lane loop in the picture.
+2. Auto → **Start camera**. The badges show `track ✓` (with how well the lane fits) and which side
+   you are on. The coloured route line must sit on the lane all the way round; if not, **Re-detect
+   track**.
+3. Place the robot on the start line, facing section a (towards side b). **Find my robot** blinks
+   its lights and finds the light that blinked (a green circle marks it); Start does this by
+   itself when needed. Lights: green by default, cyan or yellow if green clashes with someone else.
+4. Pick the speed (start at the slowest, 22 cm/s; turns follow the lane's curves, or pick
+   **Spin on the spot**), tap **Full screen**, then **Start**. STOP (or the header's STOP, or
+   leaving the app) stops it.
+5. After the run: the summary shows the time and how far off the route each section was. Export
    the logs (**Export logs**) and send them over: the route and the tuning get corrected from them.
 
-What the app does each frame: finds the mat's four corners (a dark quadrilateral on the lighter
-floor, edges refined to sub-pixel), works out which way round it is from the lane pattern, works
-out where the phone is from the mat's perspective, finds the green headlights and corrects their
-position for their height above the mat (seen from 1.1 m, a light 3 cm up appears up to 11 cm too
-far away at the far end). An estimator (Kalman filter) combines the camera fixes, which arrive
-~100 ms late, with what the wheel commands should do, and learns how the robot pulls to one side,
-how fast it really goes and how far it really turns. The follower steers by curvature towards the
-route, keeping every moving wheel above its deadband.
+What the app does each frame: marks the lane-coloured pixels (blue → purple → pink), and fits the
+known lane to their edges (a robust homography fit that only matches an edge with the lane on the
+correct side); while tracking it starts from the last frame's fit, otherwise from the lane band's
+outline, the mat's outline and a few restarts. From the fit it works out where the phone is, finds
+the robot's lights near where the robot should be, and corrects them for their height above the
+mat (seen from 1.1 m, a light 3 cm up appears up to 11 cm too far away at the far end). An
+estimator (Kalman filter) combines the camera fixes, which arrive ~100 ms late, with what the wheel
+commands should do, and learns how the robot pulls to one side, how fast it really goes and how far
+it really turns. The follower steers by curvature along the route, keeping every moving wheel above
+its deadband.
 
 Logged for every run: `auto.start` (route, settings, motor model, plan), `auto.tick` (25 per
 second: estimated pose, section, error, wheel commands, learned bias), `auto.fix` (every camera
-fix and whether it was used), `auto.cam` (once per second: fps, mat and robot found, mat corners,
-phone position), `auto.line`, `auto.spin` and `auto.end` (summary). `report.md` gets an "Auto
-runs" section, and each run saves the camera frame and a 1 cm/px top-down picture of the mat at
-its start and end into the session's images.
+fix and whether it was used), `auto.cam` (once per second: fps, track fit score, robot found, the
+search circle, phone position), `auto.line`, `auto.spin`, `auto.end` (summary) and the blink test's
+result (`app` event `auto.blink`). `report.md` gets an "Auto runs" section, and each run saves the
+camera frame and a 1 cm/px top-down picture of the mat at its start and end into the session's
+images.
 
 ## Run it
 
