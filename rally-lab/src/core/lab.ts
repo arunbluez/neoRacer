@@ -3,6 +3,9 @@
 // Platform adapters are passed in; the UI only talks to this object.
 
 import { RobotLink } from './link/link';
+import { zipSession, zipSessions, type SessionBundle } from './log/export';
+import { buildReport } from './log/report';
+import { ALL_TESTS } from './tests/registry';
 import { Poller } from './link/poller';
 import { Logger } from './log/logger';
 import { makeSessionId, robotIdFromName, SCHEMA_VERSION, type SessionHeader } from './log/session';
@@ -264,5 +267,46 @@ export class Lab {
 
   async sessionRuns(sessionId = this.logger.sessionId): Promise<TestRun[]> {
     return this.store.listTestRuns(sessionId);
+  }
+
+  /** Everything export needs for one session, with report.md. */
+  async bundle(sessionId = this.logger.sessionId): Promise<SessionBundle> {
+    const current = sessionId === this.logger.sessionId;
+    if (current) {
+      await this.logger.flush();
+      await this.saveHeader();
+    }
+    const header = (await this.store.getSession(sessionId)) ?? (current ? this.header : undefined);
+    if (!header) throw new Error(`unknown session ${sessionId}`);
+    const [events, runs] = await Promise.all([this.store.events(sessionId), this.store.listTestRuns(sessionId)]);
+    const profile = (header.robot ? await this.store.getProfile(header.robot.id) : undefined) ?? header.profile;
+    const startedAt = header.startedAt;
+    const endedAt = header.updatedAt ?? this.deps.wallClock().toISOString();
+    const calibrations = (await this.store.listCalibrations()).filter(
+      (c) => c.id === header.calibrationId || (c.createdAt >= startedAt && c.createdAt <= endedAt),
+    );
+    const images = [
+      ...(await this.store.listImages({ sessionId })),
+      ...(await Promise.all(calibrations.map((c) => this.store.listImages({ calibrationId: c.id })))).flat(),
+    ].filter((img, i, all) => all.findIndex((x) => x.id === img.id) === i);
+    const eventCounts: Record<string, number> = {};
+    for (const e of events) eventCounts[e.k] = (eventCounts[e.k] ?? 0) + 1;
+    const report = buildReport({
+      header, runs, defs: ALL_TESTS, profile, calibrations, settings: header.settings ?? this.settings, eventCounts,
+    });
+    return { header, events, runs, profile, calibrations, images, report };
+  }
+
+  async exportZip(sessionId?: string): Promise<{ name: string; bytes: Uint8Array }> {
+    const b = await this.bundle(sessionId);
+    return { name: `${b.header.id}.zip`, bytes: zipSession(b) };
+  }
+
+  async exportAllZip(): Promise<{ name: string; bytes: Uint8Array }> {
+    const sessions = await this.store.listSessions();
+    const bundles: SessionBundle[] = [];
+    for (const s of sessions) bundles.push(await this.bundle(s.id));
+    const d = this.deps.wallClock().toISOString().slice(0, 10);
+    return { name: `rally-lab-all-${d}.zip`, bytes: zipSessions(bundles) };
   }
 }

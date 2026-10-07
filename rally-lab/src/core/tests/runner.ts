@@ -101,8 +101,22 @@ export class TestRunner {
     let kept: unknown = null;
     const hardStop = setTimeout(() => token.abort(`hard maximum of ${Math.round(def.maxMs / 1000)} s reached`), def.maxMs);
 
+    // After STOP the test may not send anything but S, whatever its code does next.
+    const guarded = new Proxy(link, {
+      get(target, prop) {
+        const v = Reflect.get(target, prop, target) as unknown;
+        if (typeof v !== 'function') return v;
+        if (prop === 'send' || prop === 'query' || prop === 'repliesOf') {
+          return (...args: unknown[]) => {
+            token.throwIfAborted();
+            return abortable((v as (...a: unknown[]) => Promise<unknown>).apply(target, args), token);
+          };
+        }
+        return (v as (...a: unknown[]) => unknown).bind(target);
+      },
+    });
     const ctx: TestContext = {
-      link,
+      link: guarded,
       poller,
       token,
       settings: this.deps.settings(),

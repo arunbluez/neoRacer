@@ -26,7 +26,7 @@ export function getLab(): Lab {
   return lab;
 }
 
-const ui: TestUi = {
+export const labUi: TestUi = {
   prompt(req: PromptRequest): PromptHandle {
     const id = ++promptSeq;
     let resolve!: (r: PromptResponse) => void;
@@ -88,7 +88,7 @@ export async function initLab(): Promise<Lab> {
     saveSettings,
     lastRobotId: loadLastRobotId(),
     saveLastRobotId,
-    ui,
+    ui: labUi,
   });
   const l = lab;
   real.setLog((k, fields) => l.logger.log(k, fields));

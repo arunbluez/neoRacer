@@ -1,0 +1,120 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`report.md > matches the snapshot for a fixture session 1`] = `
+"# Rally Lab report — 20261007-101500-popuv
+
+- Started: 2026-10-07T10:15:00.000Z
+- Robot: BBC micro:bit [popuv] (id \`popuv\`)
+- Transport: web-bluetooth
+- Build: abc1234 (2026-10-07T09:00:00Z)
+- Settings: minWriteGapMs 30, replyTimeoutMs 500, packWrites false
+- Events: ble.tx 210, ble.rx 205
+
+Times are ms unless stated; distances cm; mat origin top-left, x right, y down. Full data: session.json and events.jsonl.
+
+## T1.1 Ping baseline
+
+### Run T1.1-5000-1 — done
+
+- At: 2026-10-07T10:15:05.000Z, 9 s
+- Params: \`{"count":5,"timeoutMs":500}\`
+- Summary: sent = 5, rttMin = 28.4, rttMedian = 30.6, rttP95 = 43, rttMax = 45.1, lost = 1, lossPct = 20
+- Median round trip 30.6 ms, p95 43 ms over 5 pings; 1 lost.
+
+**PING round-trip (ms)**
+
+| n | min | median | p95 | max | mean |
+| --- | --- | --- | --- | --- | --- |
+| 4 | 28.4 | 30.6 | 43 | 45.1 | 33.7 |
+
+## T1.5 Blocking commands
+
+### Run T1.5-20000-2 — done
+
+- At: 2026-10-07T10:15:20.000Z, 9 s
+- Params: \`{"commands":["ICON,HAPPY","HORN","PING"],"repeats":1,"timeoutMs":9000}\`
+- Summary: pingBaseMs = 30, block_ICON = 623, block_HORN = 206
+- Estimated block = PONG delay − PING baseline (30 ms). Values under 15 ms are treated as not blocking.
+- Saving to the profile replaces the default blocking table for this robot.
+
+**PONG delay after each command (ms)**
+
+| command | expected block | pong delay | est. block | own reply rtt | lost |
+| --- | --- | --- | --- | --- | --- |
+| ICON,HAPPY | 600 | 652.5 | 623 | – | 0 |
+| HORN | 200 | 236 | 206 | – | 0 |
+| PING | 0 | 41 | 11 | 30 | 0 |
+
+## T2.1 Surface survey
+
+### Run T2.1-40000-3 — done
+
+- At: 2026-10-07T10:15:40.000Z, 9 s
+- Params: \`{"surface":"lane purple","samples":4}\`
+- Summary: surface = lane purple, majorityCode = 0, majority = both white, sharePct = 75, samples = 4, lost = 0
+- "lane purple" reads 0 (both white) in 75 % of 4 samples. Note: mid lane
+
+**Line codes on "lane purple"**
+
+| code | meaning | count |
+| --- | --- | --- |
+| 0 | both white | 3 |
+| 1 | right black | 1 |
+| 2 | left black | 0 |
+| 3 | both black | 0 |
+
+### Run T2.1-50000-4 — done
+
+- At: 2026-10-07T10:15:50.000Z, 9 s
+- Params: \`{"surface":"black background","samples":4}\`
+- Summary: surface = black background, majorityCode = 3, majority = both black, sharePct = 100, samples = 4, lost = 0
+- "black background" reads 3 (both black) in 100 % of 4 samples.
+
+**Line codes on "black background"**
+
+| code | meaning | count |
+| --- | --- | --- |
+| 0 | both white | 0 |
+| 1 | right black | 0 |
+| 2 | left black | 0 |
+| 3 | both black | 4 |
+
+**Surface survey across labels**
+
+| surface | n | 0 white | 1 R black | 2 L black | 3 both black | majority | share % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| lane purple | 4 | 3 | 1 | 0 | 0 | 0 | 75 |
+| black background | 4 | 0 | 0 | 0 | 4 | 3 | 100 |
+
+## Robot profile
+
+\`\`\`json
+{
+  "robotId": "popuv",
+  "name": "BBC micro:bit [popuv]",
+  "trim": 0.03,
+  "compassCalibrated": false,
+  "notes": "",
+  "updatedAt": "2026-10-07T10:20:00.000Z",
+  "blocking": {
+    "ICON": 623,
+    "HORN": 206
+  }
+}
+\`\`\`
+
+## Open warnings
+
+- Packing not verified (T1.4): keep packWrites off.
+- Safe poll rate not measured (T1.2).
+- Safe write gap not measured (T1.3): using 30 ms.
+- Surfaces not surveyed (T2.1): lane blue end, lane pink end, white border, checkered white, checkered black, start line, bridge deck.
+- Deadband not measured (T3.1).
+- Speed table not measured (T3.2).
+- Spin table not measured (T3.4).
+- Effective track width not measured (T3.5).
+- Compass not calibrated: ?COMPASS would block the robot.
+- No camera calibration.
+- Camera LED latency not measured (T4.5).
+"
+`;
