@@ -7,6 +7,7 @@ import type { Poller } from '../link/poller';
 import type { RobotProfile } from '../model/profile';
 import type { Settings } from '../settings';
 import type { CancelToken } from '../util/async';
+import type { TrackCalibration } from '../vision/calibration';
 import type { PoseSource, CameraControl } from './camera';
 
 export type TestGroup = 'Link' | 'Sensors' | 'Motion' | 'Camera';
@@ -98,6 +99,8 @@ export interface TestContext {
   /** Camera tracking, when calibrated and running. */
   pose?: PoseSource;
   camera?: CameraControl;
+  /** The active track calibration, if any. */
+  calibration?: TrackCalibration;
   /** Session time now, ms. */
   now(): number;
   /** Clock time now (same base as link timestamps), ms. */

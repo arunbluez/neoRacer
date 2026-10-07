@@ -86,7 +86,8 @@ export function buildReport(input: ReportInput): string {
     out.push(`- Events: ${Object.entries(input.eventCounts).map(([k, n]) => `${k} ${n}`).join(', ')}`);
   }
   out.push('');
-  out.push('Times are ms unless stated; distances cm; mat origin top-left, x right, y down. Full data: session.json and events.jsonl.');
+  out.push('Times are ms unless stated; distances cm; mat origin top-left, x right, y down; headings in degrees, atan2(dy, dx) on the mat (0 = +x, 90 = +y).');
+  out.push('Camera poses are the position of marker A (the headlights, ~5 cm ahead of the wheel axle). Full data: session.json and events.jsonl.');
 
   const order = new Map(defs.map((d, i) => [d.id, i]));
   const ids = [...new Set(runs.map((r) => r.testId))].sort((a, b) => (order.get(a) ?? 99) - (order.get(b) ?? 99));

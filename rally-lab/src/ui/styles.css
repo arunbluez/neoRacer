@@ -119,6 +119,8 @@ h3 { font-size: 15px; margin: 16px 0 8px; color: var(--fg2); text-transform: upp
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .field > span { font-size: 13px; color: var(--fg2); }
+.field input:not([type='checkbox']):not([type='range']), .field select, .field textarea { width: 100%; min-width: 0; }
+.grid2 > *, .grid3 > * { min-width: 0; }
 input, select, textarea {
   min-height: 48px; padding: 8px 10px;
   background: var(--bg); border: 1px solid var(--line); border-radius: 10px;

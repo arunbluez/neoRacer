@@ -30,6 +30,22 @@ export function circleFit(pts: P[]): { cx: number; cy: number; r: number; rms: n
   return { cx, cy, r, rms };
 }
 
+/**
+ * Signed curvature (1/cm) of a nearly straight path, from a circle fit:
+ * positive when it bends to the robot's right (clockwise on a y-down mat).
+ * Independent of any heading measurement.
+ */
+export function signedCurvature(pts: P[]): number {
+  if (pts.length < 5) return 0;
+  const fit = circleFit(pts);
+  if (!fit || fit.r > 1e5) return 0;
+  const a = pts[0];
+  const m = pts[Math.floor(pts.length / 2)];
+  const b = pts[pts.length - 1];
+  const cross = (m.x - a.x) * (b.y - m.y) - (m.y - a.y) * (b.x - m.x);
+  return cross === 0 ? 0 : Math.sign(cross) / fit.r;
+}
+
 /** Path length of a polyline. */
 export function pathLength(pts: P[]): number {
   let d = 0;

@@ -62,15 +62,20 @@ export type ClassThresholds = {
   laneHueMax: number;
 };
 
-/** Blue (≈220°) → purple → pink (≈330°) lane, white border, black background. */
+/**
+ * Tuned on a photo of the real mat (Berlin, Oct 2026): the black background
+ * reads as V ≈ 0.25–0.42 under hall lighting, the lane runs blue (≈223°,
+ * S ≈ 0.6) → pastel purple (≈295°, S ≈ 0.28) → pink (≈335°, S ≈ 0.56), and
+ * the white borders and arrows are S < 0.15.
+ */
 export const DEFAULT_CLASS_THRESHOLDS: ClassThresholds = {
-  darkV: 0.22,
-  borderSMax: 0.25,
-  borderVMin: 0.6,
-  laneSMin: 0.25,
-  laneVMin: 0.22,
-  laneHueMin: 195,
-  laneHueMax: 345,
+  darkV: 0.5,
+  borderSMax: 0.18,
+  borderVMin: 0.62,
+  laneSMin: 0.16,
+  laneVMin: 0.5,
+  laneHueMin: 200,
+  laneHueMax: 350,
 };
 
 /** none = transparent / outside the mat (alpha < 128). */

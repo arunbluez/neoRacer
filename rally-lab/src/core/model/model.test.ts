@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as fits from './fits';
 import { arcade, tiltToStick } from './drive';
 import { alongAndSide, circleFit, radiusFromChord, steadySpeed, trackWidthFromArc, trimFromDrift, unwrapDeg } from './fits';
 import { cmPerSFor, upsertTable } from './profile';
@@ -68,5 +69,19 @@ describe('profile tables', () => {
     expect(cmPerSFor(p, 15)).toBe(5);
     expect(cmPerSFor({}, 40)).toBeUndefined();
     expect(upsertTable(p.speedTable, { cmd: 50, cmPerS: 21 })).toEqual([{ cmd: 30, cmPerS: 10 }, { cmd: 50, cmPerS: 21 }, { cmd: 100, cmPerS: 45 }]);
+  });
+});
+
+describe('signed curvature', () => {
+  it('is positive for a path bending right on a y-down mat', () => {
+    // heading +x, bending toward +y (the robot's right): circle of radius 200 centred below
+    const right = Array.from({ length: 30 }, (_, i) => {
+      const a = -Math.PI / 2 + i * 0.01;
+      return { x: 200 * Math.cos(a), y: 200 + 200 * Math.sin(a) };
+    });
+    const { signedCurvature } = fits;
+    expect(signedCurvature(right)).toBeCloseTo(1 / 200, 5);
+    expect(signedCurvature(right.map((p) => ({ x: p.x, y: -p.y })))).toBeCloseTo(-1 / 200, 5);
+    expect(signedCurvature(Array.from({ length: 10 }, (_, i) => ({ x: i, y: 0 })))).toBe(0);
   });
 });

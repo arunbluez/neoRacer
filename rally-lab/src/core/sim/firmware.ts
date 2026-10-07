@@ -17,6 +17,8 @@ export type FirmwareOptions = {
   handlerMs: number;
 };
 
+const OFF: Rgb = { r: 0, g: 0, b: 0 };
+
 export const DEFAULT_FIRMWARE_OPTIONS: FirmwareOptions = {
   rxBufferBytes: 20,
   maxQueuedEvents: 10,
@@ -54,7 +56,7 @@ export class SimFirmware {
     const t = this.clock.now();
     this.world.setMotors(0, 0, t);
     const off = { r: 0, g: 0, b: 0 };
-    this.world.lights = { hlL: off, hlR: off, ugL: off, ugR: off };
+    this.world.setLights({ hlL: off, hlR: off, ugL: off, ugR: off }, t);
     this.world.display = 'SAD';
     this.rx = '';
     this.events = 0;
@@ -112,14 +114,14 @@ export class SimFirmware {
       case 'ML': if (parts.length > 1) w.setMotors(num(n(1, 0)), w.cmdR, t); return base;
       case 'MR': if (parts.length > 1) w.setMotors(w.cmdL, num(n(1, 0)), t); return base;
       case 'MS': if (parts.length > 2) w.setMotors(num(n(1, 0)), num(n(2, 0)), t); return base;
-      case 'HL': if (parts.length > 3) { w.lights.hlL = rgbAt(); w.lights.hlR = rgbAt(); } return base;
-      case 'HLL': if (parts.length > 3) w.lights.hlL = rgbAt(); return base;
-      case 'HLR': if (parts.length > 3) w.lights.hlR = rgbAt(); return base;
-      case 'HO': w.lights = { hlL: { r: 0, g: 0, b: 0 }, hlR: { r: 0, g: 0, b: 0 }, ugL: { r: 0, g: 0, b: 0 }, ugR: { r: 0, g: 0, b: 0 } }; return base;
-      case 'UG': if (parts.length > 3) { w.lights.ugL = rgbAt(); w.lights.ugR = rgbAt(); } return base;
-      case 'UGL': if (parts.length > 3) w.lights.ugL = rgbAt(); return base;
-      case 'UGR': if (parts.length > 3) w.lights.ugR = rgbAt(); return base;
-      case 'UGO': w.lights.ugL = { r: 0, g: 0, b: 0 }; w.lights.ugR = { r: 0, g: 0, b: 0 }; return base;
+      case 'HL': if (parts.length > 3) w.setLights({ hlL: rgbAt(), hlR: rgbAt() }, t); return base;
+      case 'HLL': if (parts.length > 3) w.setLights({ hlL: rgbAt() }, t); return base;
+      case 'HLR': if (parts.length > 3) w.setLights({ hlR: rgbAt() }, t); return base;
+      case 'HO': w.setLights({ hlL: OFF, hlR: OFF, ugL: OFF, ugR: OFF }, t); return base;
+      case 'UG': if (parts.length > 3) w.setLights({ ugL: rgbAt(), ugR: rgbAt() }, t); return base;
+      case 'UGL': if (parts.length > 3) w.setLights({ ugL: rgbAt() }, t); return base;
+      case 'UGR': if (parts.length > 3) w.setLights({ ugR: rgbAt() }, t); return base;
+      case 'UGO': w.setLights({ ugL: OFF, ugR: OFF }, t); return base;
       case 'HORN': case 'BEEP': case 'QUIET': case 'MUTE': return base + blockMs(cmd);
       case 'TONE': return parts.length > 2 ? base + Math.max(0, num(n(2, 0))) : base;
       case 'DISP':

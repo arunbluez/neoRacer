@@ -60,9 +60,10 @@ export const DEFAULT_SETTINGS: Settings = {
   procWidth: 640,
   mmPerPx: 5,
   markerA: { source: 'headlights', rgb: { r: 0, g: 255, b: 0 } },
-  markerB: { source: 'underglow', rgb: { r: 255, g: 200, b: 0 } },
+  // Hues 80–210° never occur on the mat; wood, cones and the battery labels sit at 0–60°.
+  markerB: { source: 'underglow', rgb: { r: 0, g: 255, b: 255 } },
   trackingLatencyMs: 150,
-  minBlobAreaPx: 6,
+  minBlobAreaPx: 4,
   mockRobot: false,
   drive: { speedCap: 70, expo: 0.4, sendHz: 25, tiltMaxDeg: 30, lineOverlay: true },
 };

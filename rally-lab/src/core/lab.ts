@@ -15,6 +15,7 @@ import type { CameraControl, PoseSource } from './tests/camera';
 import { TestRunner } from './tests/runner';
 import type { TestRun, TestUi } from './tests/types';
 import type { Clock, DeviceInfo, LogSink, LogStore, Transport } from './types';
+import type { TrackCalibration } from './vision/calibration';
 import { errorMessage } from './util/async';
 
 export type LabEnv = {
@@ -55,6 +56,8 @@ export class Lab {
   /** Set by the camera layer while tracking is calibrated and running. */
   pose?: PoseSource;
   camera?: CameraControl;
+  /** The active track calibration (loaded by the camera layer). */
+  calibration?: TrackCalibration;
   private listeners = new Set<Listener>();
   private real?: Transport;
   private mock?: Transport;
@@ -76,6 +79,7 @@ export class Lab {
       profile: () => this.profile,
       pose: () => this.pose,
       camera: () => this.camera,
+      calibration: () => this.calibration,
       saveRun: (run) => this.store.putTestRun(run),
       artifact: (path, data) => this.artifact(path, data),
       wallClock: deps.wallClock,
@@ -253,9 +257,10 @@ export class Lab {
     return this.profile;
   }
 
-  setCalibration(id: string | undefined): void {
-    this.header.calibrationId = id;
-    this.logger.log('app', { event: 'calibration', detail: id ?? null });
+  setCalibration(cal: TrackCalibration | undefined): void {
+    this.calibration = cal;
+    this.header.calibrationId = cal?.id;
+    this.logger.log('app', { event: 'calibration', detail: cal ? { id: cal.id, reprojErrorCm: cal.reprojErrorCm } : null });
     void this.saveHeader();
     this.emit();
   }

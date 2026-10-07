@@ -77,6 +77,9 @@ export class SimWorld {
   private ax = 0;
   private ay = 0;
   private rand: () => number;
+  /** Recent poses and light changes, so a camera can show the world as it was a moment ago. */
+  private history: { t: number; x: number; y: number; heading: number }[] = [];
+  private lightLog: { t: number; lights: SimLights }[] = [];
 
   constructor(tStart: number, opts: { params?: Partial<SimParams>; mask?: TrackMask; pose?: { x: number; y: number; headingDeg: number }; seed?: number } = {}) {
     this.params = { ...DEFAULT_SIM_PARAMS, ...(opts.params ?? {}) };
@@ -133,8 +136,41 @@ export class SimWorld {
       this.ax = ((this.vl + this.vr - vl0 - vr0) / 2 / (h / 1000)) / 981; // g, forward
       this.ay = ((v * omega * Math.PI) / 180) / 981; // g, centripetal
       dt -= h;
+      this.history.push({ t: t - dt, x: this.x, y: this.y, heading: this.heading });
     }
     this.t = t;
+    if (this.history.length > 800) this.history.splice(0, this.history.length - 600);
+  }
+
+  /** Pose at a past time (interpolated from history), or now if t is not in the past. */
+  poseAt(t: number): { x: number; y: number; headingDeg: number } {
+    if (t >= this.t || this.history.length === 0) {
+      const p = this.pose(t);
+      return { x: p.x, y: p.y, headingDeg: p.headingDeg };
+    }
+    const h = this.history;
+    let i = h.length - 1;
+    while (i > 0 && h[i - 1].t > t) i--;
+    const a = h[Math.max(0, i - 1)];
+    const b = h[i];
+    if (t <= a.t || b.t === a.t) return { x: a.x, y: a.y, headingDeg: a.heading };
+    const f = (t - a.t) / (b.t - a.t);
+    let dh = b.heading - a.heading;
+    if (dh > 180) dh -= 360;
+    if (dh < -180) dh += 360;
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, headingDeg: (a.heading + dh * f + 360) % 360 };
+  }
+
+  setLights(patch: Partial<SimLights>, t: number): void {
+    this.lights = { ...this.lights, ...patch };
+    this.lightLog.push({ t, lights: this.lights });
+    if (this.lightLog.length > 200) this.lightLog.splice(0, 100);
+  }
+
+  /** Lights as they were at time t. */
+  lightsAt(t: number): SimLights {
+    for (let i = this.lightLog.length - 1; i >= 0; i--) if (this.lightLog[i].t <= t) return this.lightLog[i].lights;
+    return this.lightLog.length ? { hlL: OFF, hlR: OFF, ugL: OFF, ugR: OFF } : this.lights;
   }
 
   pose(t: number): SimPose {

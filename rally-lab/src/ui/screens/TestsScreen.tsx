@@ -176,7 +176,8 @@ function TestCard({ def, onBack }: { def: TestDefinition; onBack: () => void }) 
 export function TestsScreen() {
   useLabVersion();
   const lab = getLab();
-  const [selected, setSelected] = useState<string | null>(() => lab.runner.state.run?.testId ?? null);
+  const selected = useApp((s) => s.selectedTest ?? lab.runner.state.run?.testId ?? null);
+  const setSelected = useApp((s) => s.setSelectedTest);
   const def = selected ? testById(selected) : undefined;
   if (def) return <TestCard key={def.id} def={def} onBack={() => setSelected(null)} />;
   const last = (id: string) => lab.runner.history.find((r) => r.testId === id);

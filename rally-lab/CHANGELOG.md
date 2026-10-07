@@ -50,3 +50,30 @@
 - Tests: drive mixing and fits; T3.1, T3.2, T3.4, T3.5 end to end against the simulated robot with
   a simulated tester entering true measurements (recovers the sim's deadband, right-wheel
   mismatch and track width).
+
+## M3 — Camera (2026-10-07)
+
+- Camera setup: camera picker (remembered), 1280×720 at 30 fps requested and the granted
+  settings shown and logged, zoom slider (defaults to widest), lock exposure / white balance /
+  focus where supported, live "check" outline of the calibrated mat. `requestVideoFrameCallback`
+  capture timestamps, falling back to requestAnimationFrame.
+- Track calibration: capture a still, tap the four corners (loupe, draggable), mat size, up to 8
+  extra known points, normalised DLT, reprojected outline; saved with the still image.
+- Track map: still warped top-down at `mmPerPx` (bilinear), offtrack/border/lane/other
+  classification with HSV sliders and live preview, class percentages, map and mask PNGs,
+  colour scan with marker hue suggestions, named landmarks.
+- Marker calibration: light source + colour for markers A and B, tap to sample, tolerance
+  sliders, live mask overlay.
+- Tracking: per-frame search windows, largest blob, centroids through H, heading B → A (or from
+  velocity), alpha-beta filter, latency prediction, `cam.pose` and `cam.stats` logging, live
+  overlay and a top-down mini-map with a speed-coloured trail. ~0.5 ms per 640×360 frame.
+- Camera tests T4.1 capabilities, T4.2 calibration check, T4.3 tracking quality, T4.4 frame
+  timing, T4.5 LED latency (also sets the tracker's prediction latency), T4.6 motion latency,
+  T4.7 tracked lap (trajectory, speed profile, lap time from a start/finish landmark, line codes
+  along the path). T3 motion tests use camera measurements when tracking is on.
+- Simulated camera for the mock robot, using the viewpoint of a photo of the real track, with
+  pose and light history so latencies are realistic.
+- From a photo of the real mat: the synthetic track now follows the measured layout (18 cm lane,
+  serpentine, arrows, lettering, ramps, bridge, cones), default class thresholds are tuned to
+  the real colours (with a regression test on a rectified 1 cm/px picture of the mat), and
+  marker B defaults to cyan (hues 80–210° never occur on the mat).

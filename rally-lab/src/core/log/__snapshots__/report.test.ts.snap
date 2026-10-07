@@ -10,7 +10,8 @@ exports[`report.md > matches the snapshot for a fixture session 1`] = `
 - Settings: minWriteGapMs 30, replyTimeoutMs 500, packWrites false
 - Events: ble.tx 210, ble.rx 205
 
-Times are ms unless stated; distances cm; mat origin top-left, x right, y down. Full data: session.json and events.jsonl.
+Times are ms unless stated; distances cm; mat origin top-left, x right, y down; headings in degrees, atan2(dy, dx) on the mat (0 = +x, 90 = +y).
+Camera poses are the position of marker A (the headlights, ~5 cm ahead of the wheel axle). Full data: session.json and events.jsonl.
 
 ## T1.1 Ping baseline
 

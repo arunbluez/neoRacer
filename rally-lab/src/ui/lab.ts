@@ -110,6 +110,9 @@ export async function initLab(): Promise<Lab> {
     if (hidden) l.onHidden();
     else l.onVisible();
   });
+  void import('./camera/controller').then(({ cameraController }) => cameraController.init()).catch((err: unknown) => {
+    l.logger.log('app', { event: 'error', detail: `loading calibration failed: ${String(err)}` });
+  });
   window.addEventListener('error', (e) => l.logger.log('app', { event: 'error', detail: String(e.message) }));
   window.addEventListener('unhandledrejection', (e) => l.logger.log('app', { event: 'error', detail: String(e.reason) }));
   return l;

@@ -1,7 +1,7 @@
 // T3.x — motion experiments. Robot on the mat. Measured by camera tracking
 // when it is calibrated and running, otherwise by manual entry.
 
-import { alongAndSide, circleFit, medianOrNull, radiusFromChord, speeds, steadySpeed, trackWidthFromArc, trimFromDrift, unwrapDeg } from '../model/fits';
+import { alongAndSide, circleFit, radiusFromChord, signedCurvature, speeds, steadySpeed, trackWidthFromArc, trimFromDrift, unwrapDeg } from '../model/fits';
 import { cmPerSFor, upsertTable, type RobotProfile } from '../model/profile';
 import { mean, median } from '../util/stats';
 import { angleDiffDeg } from '../vision/pose';
@@ -168,6 +168,8 @@ type StraightRun = {
   durMs: number;
   along: number | null;
   side: number | null;
+  /** Camera only: signed curvature of the path, 1/cm (+ = bends right). */
+  curvature?: number;
   avgCmS: number | null;
   steadyCmS: number | null;
   by: 'camera' | 'manual';
@@ -191,7 +193,11 @@ async function straightRun(ctx: TestContext, speed: number, durMs: number): Prom
     const { along, side } = alongAndSide(start, start.heading, endP);
     const pts = c.poses.map((q) => ({ t: q.tFrame - c.tCmd, x: q.fx, y: q.fy }));
     const steady = steadySpeed(pts, Math.min(500, durMs / 2), durMs);
-    return { speed, durMs, along: r1(along), side: r1(side), avgCmS: r1(along / (durMs / 1000)), steadyCmS: steady === null ? null : r1(steady), by: 'camera', path: pts.map((q) => ({ t: Math.round(q.t), x: r1(q.x), y: r1(q.y) })) };
+    const moving = pts.filter((q) => q.t > 150 && q.t <= durMs);
+    return {
+      speed, durMs, along: r1(along), side: r1(side), curvature: signedCurvature(moving), avgCmS: r1(along / (durMs / 1000)),
+      steadyCmS: steady === null ? null : r1(steady), by: 'camera', path: pts.map((q) => ({ t: Math.round(q.t), x: r1(q.x), y: r1(q.y) })),
+    };
   }
   await ctx.link.send(`F,${speed}`);
   await ctx.sleep(durMs);
@@ -204,11 +210,22 @@ async function straightRun(ctx: TestContext, speed: number, durMs: number): Prom
   return { speed, durMs, along, side: Number.isFinite(m.side) ? m.side : 0, avgCmS: along === null ? null : r1(along / (durMs / 1000)), steadyCmS: null, by: 'manual' };
 }
 
+/** Runs shorter than this say little about drift: tracking noise looks like a bend. */
+const MIN_TRIM_RUN_CM = 25;
+
 function straightSummary(d: T32Data, profile?: RobotProfile) {
-  const trims = d.runs
-    .filter((r) => r.along !== null && r.side !== null && r.along > 10)
-    .map((r) => trimFromDrift(r.along!, r.side!, d.trackWidthCm));
-  const trim = medianOrNull(trims);
+  // Camera: curvature of the path (no heading needed). Manual: drift over distance.
+  // Long runs carry far more information, so weight by distance squared.
+  let wSum = 0;
+  let tSum = 0;
+  for (const r of d.runs) {
+    if (r.along === null || r.along < MIN_TRIM_RUN_CM) continue;
+    const t = r.curvature !== undefined ? r.curvature * d.trackWidthCm : r.side !== null ? trimFromDrift(r.along, r.side, d.trackWidthCm) : NaN;
+    if (!Number.isFinite(t)) continue;
+    wSum += r.along * r.along;
+    tSum += t * r.along * r.along;
+  }
+  const trim = wSum > 0 ? tSum / wSum : null;
   const clampTrim = trim === null ? null : Math.max(-0.2, Math.min(0.2, trim));
   let table = profile?.speedTable;
   for (const r of d.runs) {
@@ -256,7 +273,7 @@ export const T3_2: TestDefinition = {
         rows: d.runs.map((r) => [r.speed, r.along, r.side, r.avgCmS, r.steadyCmS, r.by]),
       }],
       notes: [
-        trim === null ? 'No trim suggestion (need distance and drift).' : `Suggested trim ${r1(trim * 100)} % on the right wheel (track width ${d.trackWidthCm} cm${profile?.trackWidthCm ? '' : ', assumed'}).`,
+        trim === null ? `No trim suggestion: needs runs of at least ${MIN_TRIM_RUN_CM} cm (use s ≥ 70 or a longer drive time).` : `Suggested trim ${r1(trim * 100)} % on the right wheel (track width ${d.trackWidthCm} cm${profile?.trackWidthCm ? '' : ', assumed'}).`,
         d.measuredBy === 'manual' ? 'Manual: speed = distance / drive time, so it includes start-up and coasting.' : 'Camera: steady speed from the second half of the run.',
       ],
       profilePatch: { ...(table ? { speedTable: table } : {}), ...(trim !== null ? { trim: Math.round(trim * 1000) / 1000 } : {}) },

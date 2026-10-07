@@ -9,6 +9,7 @@ import type { RobotProfile } from '../model/profile';
 import type { Settings } from '../settings';
 import type { Clock } from '../types';
 import { abortable, CancelToken, errorMessage, isAborted, sleep } from '../util/async';
+import type { TrackCalibration } from '../vision/calibration';
 import type { CameraControl, PoseSource } from './camera';
 import type {
   Params, Progress, PromptRequest, PromptResponse, TestContext, TestDefinition, TestRun, TestUi,
@@ -24,6 +25,7 @@ export type RunnerDeps = {
   profile: () => RobotProfile | undefined;
   pose?: () => PoseSource | undefined;
   camera?: () => CameraControl | undefined;
+  calibration?: () => TrackCalibration | undefined;
   saveRun: (run: TestRun) => Promise<void>;
   artifact?: (path: string, data: unknown) => void;
   wallClock: () => Date;
@@ -123,6 +125,7 @@ export class TestRunner {
       profile: this.deps.profile(),
       pose: this.deps.pose?.(),
       camera: this.deps.camera?.(),
+      calibration: this.deps.calibration?.(),
       ui: {
         prompt: (req: PromptRequest) => {
           const h = this.deps.ui.prompt(req);

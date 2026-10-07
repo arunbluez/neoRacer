@@ -16,6 +16,9 @@ export type OpenPrompt = {
 type AppState = {
   tab: Tab;
   setTab: (t: Tab) => void;
+  /** Test card open on the Tests tab (kept across tab switches). */
+  selectedTest: string | null;
+  setSelectedTest: (id: string | null) => void;
   prompts: OpenPrompt[];
   addPrompt: (p: OpenPrompt) => void;
   removePrompt: (id: number) => void;
@@ -37,6 +40,8 @@ let toastId = 0;
 export const useApp = create<AppState>((set) => ({
   tab: 'connect',
   setTab: (tab) => set({ tab }),
+  selectedTest: null,
+  setSelectedTest: (selectedTest) => set({ selectedTest }),
   prompts: [],
   addPrompt: (p) => set((s) => ({ prompts: [...s.prompts, p] })),
   removePrompt: (id) => set((s) => ({ prompts: s.prompts.filter((p) => p.id !== id) })),
