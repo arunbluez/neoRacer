@@ -68,7 +68,8 @@ export const DEFAULT_SETTINGS: Settings = {
   minBlobAreaPx: 4,
   trackInWorker: false,
   mockRobot: false,
-  drive: { speedCap: 70, expo: 0.4, sendHz: 25, tiltMaxDeg: 30, lineOverlay: true },
+  // sendHz 0: send at the write gap (minWriteGapMs)
+  drive: { speedCap: 70, expo: 0.4, sendHz: 0, tiltMaxDeg: 30, lineOverlay: true },
 };
 
 /** Fill in fields missing from older stored settings. */

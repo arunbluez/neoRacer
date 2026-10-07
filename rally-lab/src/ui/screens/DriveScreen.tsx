@@ -155,7 +155,8 @@ export function DriveScreen() {
 
   // Send loop at the write gap (or the configured rate, whichever is slower).
   useEffect(() => {
-    const period = Math.max(lab.settings.minWriteGapMs, 1000 / Math.max(1, lab.settings.drive.sendHz));
+    const hz = lab.settings.drive.sendHz;
+    const period = Math.max(lab.settings.minWriteGapMs, hz > 0 ? 1000 / hz : 0, 10);
     let wasActive = false;
     const h = setInterval(() => {
       if (!lab.link.connected) return;

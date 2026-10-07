@@ -191,6 +191,8 @@ export class Lab {
     this.profile = profile;
     this.deps.saveLastRobotId?.(robotId);
     this.link.configure(this.linkConfig());
+    // Keep the round trip live in the header from the first second.
+    if (this.poller.entries.length === 0 && !this.runner.running) this.poller.set([{ cmd: 'PING', hz: 2 }], 'default');
 
     // A session that has not talked to any robot yet takes the robot's name.
     const fresh = !this.header.robot && (this.logger.counts.get('ble.tx') ?? 0) === 0;

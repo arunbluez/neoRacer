@@ -291,7 +291,7 @@ function SettingsPanel() {
         <div className="grid2">
           <NumberSetting label="Drive speed cap" value={s.drive.speedCap} onChange={(v) => set({ drive: { ...s.drive, speedCap: v } })} />
           <NumberSetting label="Drive expo (0..1)" value={s.drive.expo} onChange={(v) => set({ drive: { ...s.drive, expo: v } })} />
-          <NumberSetting label="Drive send rate" unit="Hz" value={s.drive.sendHz} onChange={(v) => set({ drive: { ...s.drive, sendHz: v } })} />
+          <NumberSetting label="Drive send rate (0 = every write gap)" unit="Hz" value={s.drive.sendHz} onChange={(v) => set({ drive: { ...s.drive, sendHz: v } })} />
           <NumberSetting label="Tilt range" unit="°" value={s.drive.tiltMaxDeg} onChange={(v) => set({ drive: { ...s.drive, tiltMaxDeg: v } })} />
         </div>
       </div>
