@@ -40,7 +40,8 @@ export default defineConfig(({ command }) => {
           short_name: 'Rally Lab',
           description: 'Cutebot measurement lab over Web Bluetooth',
           display: 'standalone',
-          orientation: 'portrait',
+          // Portrait for driving, landscape for the camera (a portrait camera frame is a narrow strip).
+          orientation: 'any',
           background_color: '#0d1117',
           theme_color: '#0d1117',
           start_url: '.',

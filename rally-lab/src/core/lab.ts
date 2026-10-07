@@ -224,7 +224,8 @@ export class Lab {
   /** The page became hidden: stop motors, tests and pollers. */
   onHidden(): void {
     if (this.link.connected) void this.link.stop();
-    this.runner.abort('page hidden');
+    // A test that is only waiting for a typed measurement can carry on when the page is back.
+    if (!this.runner.waitingForUser) this.runner.abort('page hidden');
     this.poller.stop();
     this.logger.log('app', { event: 'visibility', detail: 'hidden' });
     void this.logger.flush();
@@ -232,6 +233,7 @@ export class Lab {
 
   onVisible(): void {
     this.logger.log('app', { event: 'visibility', detail: 'visible' });
+    if (this.link.connected && this.poller.entries.length === 0 && !this.runner.running) this.poller.set([{ cmd: 'PING', hz: 2 }], 'default');
   }
 
   async setSettings(patch: Partial<Settings>): Promise<void> {

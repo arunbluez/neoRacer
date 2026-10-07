@@ -96,6 +96,9 @@ export function TrackView() {
         )}
       </div>
       {!cal && <p className="warn-text">No calibration yet.</p>}
+      {cc.tracking && pipe?.calibrationMismatch && (
+        <p className="bad-text">The picture's shape doesn't match the calibration (phone rotated, or a different frame shape). Hold the phone as when you calibrated, or calibrate again.</p>
+      )}
       {!lab.settings.markerA.hsv && <p className="warn-text">Marker A is not calibrated (Markers tab).</p>}
       <LiveView
         draw={(g, s) => {

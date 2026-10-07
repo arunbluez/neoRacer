@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import * as fits from './fits';
-import { arcade, tiltToStick } from './drive';
+import { arcade, tiltToStick, trimAt } from './drive';
 import { alongAndSide, circleFit, radiusFromChord, steadySpeed, trackWidthFromArc, trimFromDrift, unwrapDeg } from './fits';
 import { cmPerSFor, upsertTable } from './profile';
 
 describe('drive mixing', () => {
-  const cfg = { speedCap: 100, expo: 0, trim: 0 };
+  const cfg = { speedCap: 100, expo: 0, trim: 0, deadzone: 0 };
   it('mixes throttle and turn', () => {
     expect(arcade(0, 1, cfg)).toEqual({ l: 100, r: 100 });
     expect(arcade(0, -1, cfg)).toEqual({ l: -100, r: -100 });
@@ -25,6 +25,31 @@ describe('drive mixing', () => {
     const full = arcade(0, 1, { ...cfg, trim: 0.1 });
     expect(full.r).toBe(100);
     expect(full.l).toBe(91);
+  });
+  it('starts each wheel at its deadband, so the first stick travel already moves', () => {
+    const db = { lf: 20, lb: 15, rf: 20, rb: 20 };
+    const c = { speedCap: 50, expo: 0, trim: 0, deadband: db, deadzone: 0.06 };
+    expect(arcade(0, 0.04, c)).toEqual({ l: 0, r: 0 }); // inside the centre dead zone
+    const slow = arcade(0, 0.1, c);
+    expect(slow.l).toBeGreaterThanOrEqual(20);
+    expect(slow.l).toBeLessThan(23);
+    expect(arcade(0, 1, c)).toEqual({ l: 50, r: 50 });
+    expect(arcade(0, -0.5, c).l).toBeLessThanOrEqual(-15);
+    // a gentle turn keeps both wheels above their deadband (no lurch)
+    const turn = arcade(0.15, 0.6, c);
+    expect(turn.l).toBeGreaterThan(turn.r);
+    expect(turn.r).toBeGreaterThanOrEqual(20);
+  });
+  it('trims the right wheel per speed and never under its deadband', () => {
+    const table = [{ cmd: 30, trim: -0.115 }, { cmd: 50, trim: -0.08 }];
+    expect(trimAt({ trim: 0, trimTable: table }, 40)).toBeCloseTo(-0.0975);
+    expect(trimAt({ trim: 0, trimTable: table }, 20)).toBeCloseTo(-0.115);
+    expect(trimAt({ trim: 0, trimTable: table }, 90)).toBeCloseTo(-0.08);
+    expect(trimAt({ trim: -0.05 }, 40)).toBe(-0.05);
+    const db = { lf: 20, lb: 15, rf: 20, rb: 20 };
+    const c = { speedCap: 50, expo: 0, trim: 0, trimTable: table, deadband: db, deadzone: 0 };
+    expect(arcade(0, 1, c)).toEqual({ l: 50, r: 46 });
+    expect(arcade(0, 0.02, c).r).toBe(20);
   });
   it('maps tilt with a dead zone', () => {
     expect(tiltToStick(30, 0, { beta: 30, gamma: 0 }, 30)).toEqual({ x: 0, y: 0 });

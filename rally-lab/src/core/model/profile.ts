@@ -9,6 +9,8 @@ export type RobotProfile = {
   mac?: string;
   /** -0.2..0.2, applied to the right wheel: right = right * (1 + trim). */
   trim: number;
+  /** Trim per command level (T3.2, T3.7); preferred over `trim` when present. */
+  trimTable?: { cmd: number; trim: number }[];
   /** Lowest command that moves the robot: left/right wheel, forward/back. */
   deadband?: { lf: number; lb: number; rf: number; rb: number };
   speedTable?: { cmd: number; cmPerS: number }[];

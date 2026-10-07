@@ -4,7 +4,7 @@ import { alongAndSide } from '../model/fits';
 import { drive, makeLab } from '../testing/labHarness';
 import type { PromptHandle, PromptRequest, PromptResponse, TestUi } from './types';
 import { defaultParams } from './types';
-import { T3_1, T3_2, T3_4, T3_5 } from './motionTests';
+import { T3_1, T3_2, T3_4, T3_5, T3_7 } from './motionTests';
 
 /** A tester who watches the simulated robot and measures it perfectly. */
 function simTester(getMock: () => MockTransport, now: () => number): TestUi {
@@ -48,7 +48,7 @@ function simTester(getMock: () => MockTransport, now: () => number): TestUi {
           else if (f.key === 'chord') values.chord = Math.hypot(p.x - start.x, p.y - start.y);
           else values[f.key] = 0;
         }
-        if (req.title.includes(': angle')) values.deg = mock.world.totalTurnDeg;
+        if (req.title.includes(': angle')) values.turns = mock.world.totalTurnDeg / 360;
         if (req.title.includes(': measure') && 'deg' in values) values.deg = Math.min(turned, 360 - turned);
         result = new Promise((r) => setTimeout(() => r({ button: (req.buttons ?? ['Next'])[0], values }), 30));
       }
@@ -111,5 +111,21 @@ describe('motion tests with manual entry against the simulated robot', () => {
     const run = await drive(lab.runner.run(T3_4, { ...defaultParams(T3_4), speeds: [50] }));
     expect(run.status).toBe('done');
     expect(Number(run.summary!.values.degPerS_50)).toBeGreaterThan(100);
+  });
+
+  it('T3.7 tunes the trim with the Drive mixing until it drives straight', async () => {
+    const { lab } = await setup();
+    await lab.updateProfile({ deadband: { lf: 15, lb: 15, rf: 15, rb: 15 } });
+    const first = await drive(lab.runner.run(T3_7, { speed: 60, durationS: 2 }));
+    expect(first.status).toBe('done');
+    // the sim's right wheel is 3 % slow: it drifts right, so the right wheel needs more
+    const drift1 = Math.abs(Number(first.summary!.values.driftCm));
+    const next = Number(first.summary!.values.newTrimPct);
+    expect(next).toBeGreaterThan(1);
+    expect(next).toBeLessThan(6);
+    await lab.updateProfile(first.summary!.profilePatch!);
+    const second = await drive(lab.runner.run(T3_7, { speed: 60, durationS: 2 }));
+    expect(Math.abs(Number(second.summary!.values.driftCm))).toBeLessThan(drift1 / 2);
+    expect(String(second.summary!.values.sent)).toMatch(/^MS,60,6[1-4]$/);
   });
 });

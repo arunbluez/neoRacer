@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { onTilt, vibrate, type Tilt } from '../../adapters/device/device';
-import { arcade, tiltToStick } from '../../core/model/drive';
+import { arcade, tiltToStick, trimAt, type DriveConfig } from '../../core/model/drive';
 import { useApp } from '../appStore';
 import { fmt, fmtTime, useLabVersion, useTicker } from '../hooks';
 import { getLab } from '../lab';
@@ -108,7 +108,10 @@ export function DriveScreen() {
   const [mode, setMode] = useState<'stick' | 'tilt'>('stick');
   const [cap, setCap] = useState(d.speedCap);
   const [expo, setExpo] = useState(d.expo);
+  const [turnGain, setTurnGain] = useState(d.turnGain);
+  const [useDeadband, setUseDeadband] = useState(d.useDeadband);
   const [trim, setTrim] = useState(lab.profile?.trim ?? 0);
+  const [trimTable, setTrimTable] = useState(lab.profile?.trimTable);
   const [overlay, setOverlay] = useState(d.lineOverlay);
   const [tiltHeld, setTiltHeld] = useState(false);
   const stick = useRef<Stick>({ x: 0, y: 0, active: false });
@@ -118,10 +121,16 @@ export function DriveScreen() {
   const [out, setOut] = useState({ l: 0, r: 0 });
 
   // Live config for the send loop without restarting it.
-  const cfg = useRef({ cap, expo, trim, mode, tiltHeld });
-  cfg.current = { cap, expo, trim, mode, tiltHeld };
+  const deadband = useDeadband ? lab.profile?.deadband : undefined;
+  const mix: DriveConfig = { speedCap: cap, expo, trim, trimTable, turnGain, deadband, deadzone: d.deadzone };
+  const cfg = useRef({ mix, mode, tiltHeld });
+  cfg.current = { mix, mode, tiltHeld };
 
-  useEffect(() => setTrim(lab.profile?.trim ?? 0), [lab.profile?.trim]);
+  useEffect(() => {
+    setTrim(lab.profile?.trim ?? 0);
+    setTrimTable(lab.profile?.trimTable);
+  }, [lab.profile?.trim, lab.profile?.trimTable]);
+  const trimNow = trimAt({ trim, trimTable }, cap);
 
   // Tilt sensor
   useEffect(() => {
@@ -177,7 +186,7 @@ export function DriveScreen() {
         return;
       }
       wasActive = true;
-      const { l, r } = arcade(x, y, { speedCap: c.cap, expo: c.expo, trim: c.trim });
+      const { l, r } = arcade(x, y, c.mix);
       sendNow(l, r, { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 });
     }, period);
     return () => {
@@ -190,7 +199,14 @@ export function DriveScreen() {
   const code = lineEv?.reply.type === 'line' && performance.now() - lineEv.tRx < 1000 ? lineEv.reply.code : undefined;
   const snap = lab.link.snapshot();
 
-  const saveDriveSettings = () => void lab.setSettings({ drive: { ...lab.settings.drive, speedCap: cap, expo, lineOverlay: overlay } });
+  const saveDriveSettings = (patch: Partial<typeof d> = {}) =>
+    void lab.setSettings({ drive: { ...lab.settings.drive, speedCap: cap, expo, turnGain, useDeadband, lineOverlay: overlay, ...patch } });
+  /** Move the trim at the current speed; a per-speed table shifts as a whole. */
+  const changeTrim = (value: number) => {
+    if (trimTable?.length) setTrimTable(trimTable.map((t) => ({ ...t, trim: Math.round((t.trim + value - trimNow) * 1000) / 1000 })));
+    else setTrim(value);
+  };
+  const saveTrim = () => void lab.updateProfile(trimTable?.length ? { trimTable } : { trim });
 
   return (
     <div>
@@ -238,19 +254,36 @@ export function DriveScreen() {
       <div className="card" style={{ marginTop: 12 }}>
         <label className="field">
           <span>Speed cap {cap}</span>
-          <input type="range" min={10} max={100} step={5} value={cap} onChange={(e) => setCap(Number(e.target.value))} onPointerUp={saveDriveSettings} />
+          <input type="range" min={10} max={100} step={5} value={cap} onChange={(e) => setCap(Number(e.target.value))} onPointerUp={() => saveDriveSettings()} />
         </label>
         <label className="field">
-          <span>Expo {expo.toFixed(2)}</span>
-          <input type="range" min={0} max={1} step={0.05} value={expo} onChange={(e) => setExpo(Number(e.target.value))} onPointerUp={saveDriveSettings} />
+          <span>Turn sensitivity {turnGain.toFixed(2)}</span>
+          <input type="range" min={0.15} max={1} step={0.05} value={turnGain} onChange={(e) => setTurnGain(Number(e.target.value))} onPointerUp={() => saveDriveSettings()} />
         </label>
         <label className="field">
-          <span>Trim {(trim * 100).toFixed(1)} % (right wheel){lab.profile ? '' : ' — connect to save it'}</span>
-          <input
-            type="range" min={-20} max={20} step={0.5} value={trim * 100}
-            onChange={(e) => setTrim(Number(e.target.value) / 100)}
-            onPointerUp={() => void lab.updateProfile({ trim })}
-          />
+          <span>Expo {expo.toFixed(2)} (higher = gentler near the centre)</span>
+          <input type="range" min={0} max={1} step={0.05} value={expo} onChange={(e) => setExpo(Number(e.target.value))} onPointerUp={() => saveDriveSettings()} />
+        </label>
+        <label className="row" style={{ marginBottom: 10 }}>
+          <input type="checkbox" checked={useDeadband} onChange={(e) => { setUseDeadband(e.target.checked); saveDriveSettings({ useDeadband: e.target.checked }); }} />
+          <span>
+            Start at the wheels' deadband
+            {lab.profile?.deadband
+              ? ` (L ${lab.profile.deadband.lf}/${lab.profile.deadband.lb}, R ${lab.profile.deadband.rf}/${lab.profile.deadband.rb})`
+              : ' — run T3.1 to measure it'}
+          </span>
+        </label>
+        <label className="field">
+          <span>
+            Trim {(trimNow * 100).toFixed(1)} % on the right wheel{trimTable?.length ? ` at speed ${cap}` : ''}
+            {lab.profile ? '' : ' — connect to save it'}
+          </span>
+          <input type="range" min={-20} max={20} step={0.5} value={trimNow * 100} onChange={(e) => changeTrim(Number(e.target.value) / 100)} onPointerUp={saveTrim} />
+          {trimTable?.length ? (
+            <small className="hint">Per speed: {trimTable.map((t) => `${t.cmd} → ${(t.trim * 100).toFixed(1)} %`).join(' · ')}. Fine-tune with test T3.7.</small>
+          ) : (
+            <small className="hint">Drifts left → move trim down; drifts right → up. Test T3.7 tunes it for you.</small>
+          )}
         </label>
       </div>
       <LapTimer />

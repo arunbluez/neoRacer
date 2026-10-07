@@ -2,6 +2,7 @@
 // when it is calibrated and running, otherwise by manual entry.
 
 import { alongAndSide, circleFit, radiusFromChord, signedCurvature, speeds, steadySpeed, trackWidthFromArc, trimFromDrift, unwrapDeg } from '../model/fits';
+import { arcade, trimAt } from '../model/drive';
 import { cmPerSFor, upsertTable, type RobotProfile } from '../model/profile';
 import { mean, median } from '../util/stats';
 import { angleDiffDeg } from '../vision/pose';
@@ -186,12 +187,12 @@ type StraightRun = {
 };
 type T32Data = { measuredBy: 'camera' | 'manual'; runs: StraightRun[]; trackWidthCm: number; note?: string; at?: string };
 
-async function straightRun(ctx: TestContext, speed: number, durMs: number): Promise<StraightRun> {
+async function straightRun(ctx: TestContext, speed: number, durMs: number, command = `F,${speed}`): Promise<StraightRun> {
   const cam = camera(ctx, true);
-  await placeRobot(ctx, `On a straight, pointing along it, with ${Math.round(speed * durMs / 1000 * 0.6) + 20} cm clear ahead. Drives F,${speed} for ${durMs / 1000} s.${cam ? '' : ' Put a mark at the front of the robot first.'}`);
+  await placeRobot(ctx, `On a straight, pointing along it, with ${Math.round(speed * durMs / 1000 * 1.2) + 20} cm clear ahead. Drives ${command} for ${durMs / 1000} s.${cam ? '' : ' Put a mark at the front of the robot first.'}`);
   if (cam) {
     const c = await captureMotion(ctx, cam, async () => {
-      await ctx.link.send(`F,${speed}`);
+      await ctx.link.send(command);
       await ctx.sleep(durMs);
       await ctx.link.stop();
       return ctx.clockNow();
@@ -208,7 +209,7 @@ async function straightRun(ctx: TestContext, speed: number, durMs: number): Prom
       steadyCmS: steady === null ? null : r1(steady), by: 'camera', path: pts.map((q) => ({ t: Math.round(q.t), x: r1(q.x), y: r1(q.y) })),
     };
   }
-  await ctx.link.send(`F,${speed}`);
+  await ctx.link.send(command);
   await ctx.sleep(durMs);
   await ctx.link.stop();
   return measureStraightByHand(ctx, speed, durMs);
@@ -226,26 +227,35 @@ async function measureStraightByHand(ctx: TestContext, speed: number, durMs: num
 /** Runs shorter than this say little about drift: tracking noise looks like a bend. */
 const MIN_TRIM_RUN_CM = 25;
 
-function straightSummary(d: T32Data, profile?: RobotProfile) {
+/** Trim that would have kept one straight run straight, or null if the run says too little. */
+function runTrim(r: StraightRun, trackWidthCm: number): number | null {
+  if (r.along === null || r.along < MIN_TRIM_RUN_CM) return null;
   // Camera: curvature of the path (no heading needed). Manual: drift over distance.
+  const t = r.curvature !== undefined ? r.curvature * trackWidthCm : r.side !== null ? trimFromDrift(r.along, r.side, trackWidthCm) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+const clampTrim = (t: number) => Math.round(Math.max(-0.2, Math.min(0.2, t)) * 1000) / 1000;
+
+function straightSummary(d: T32Data, profile?: RobotProfile) {
   // Long runs carry far more information, so weight by distance squared.
   let wSum = 0;
   let tSum = 0;
+  let trimTable = profile?.trimTable;
   for (const r of d.runs) {
-    if (r.along === null || r.along < MIN_TRIM_RUN_CM) continue;
-    const t = r.curvature !== undefined ? r.curvature * d.trackWidthCm : r.side !== null ? trimFromDrift(r.along, r.side, d.trackWidthCm) : NaN;
-    if (!Number.isFinite(t)) continue;
-    wSum += r.along * r.along;
-    tSum += t * r.along * r.along;
+    const t = runTrim(r, d.trackWidthCm);
+    if (t === null) continue;
+    wSum += r.along! * r.along!;
+    tSum += t * r.along! * r.along!;
+    trimTable = upsertTable(trimTable, { cmd: r.speed, trim: clampTrim(t) });
   }
-  const trim = wSum > 0 ? tSum / wSum : null;
-  const clampTrim = trim === null ? null : Math.max(-0.2, Math.min(0.2, trim));
+  const trim = wSum > 0 ? clampTrim(tSum / wSum) : null;
   let table = profile?.speedTable;
   for (const r of d.runs) {
     const v = r.steadyCmS ?? r.avgCmS;
     if (v !== null) table = upsertTable(table, { cmd: r.speed, cmPerS: v });
   }
-  return { trim: clampTrim, table };
+  return { trim, table, trimTable: trim === null ? undefined : trimTable };
 }
 
 export const T3_2: TestDefinition = {
@@ -274,7 +284,7 @@ export const T3_2: TestDefinition = {
   },
   summarize(raw, _p, { profile }) {
     const d = raw as T32Data;
-    const { trim, table } = straightSummary(d, profile);
+    const { trim, table, trimTable } = straightSummary(d, profile);
     return {
       values: {
         measuredBy: d.measuredBy, trimSuggestionPct: trim === null ? null : r1(trim * 100),
@@ -282,14 +292,73 @@ export const T3_2: TestDefinition = {
       },
       tables: [{
         title: `F,s for ${(d.runs[0]?.durMs ?? 0) / 1000} s`,
-        columns: ['speed', 'distance cm', 'drift cm (+right)', 'avg cm/s', 'steady cm/s', 'by'],
-        rows: d.runs.map((r) => [r.speed, r.along, r.side, r.avgCmS, r.steadyCmS, r.by]),
+        columns: ['speed', 'distance cm', 'drift cm (+right)', 'avg cm/s', 'steady cm/s', 'trim %', 'by'],
+        rows: d.runs.map((r) => {
+          const t = runTrim(r, d.trackWidthCm);
+          return [r.speed, r.along, r.side, r.avgCmS, r.steadyCmS, t === null ? null : r1(t * 100), r.by];
+        }),
       }],
       notes: [
         trim === null ? `No trim suggestion: needs runs of at least ${MIN_TRIM_RUN_CM} cm (use s ≥ 70 or a longer drive time).` : `Suggested trim ${r1(trim * 100)} % on the right wheel (track width ${d.trackWidthCm} cm${profile?.trackWidthCm ? '' : ', assumed'}).`,
         d.measuredBy === 'manual' ? 'Manual: speed = distance / drive time, so it includes start-up and coasting.' : 'Camera: steady speed from the second half of the run.',
       ],
-      profilePatch: { ...(table ? { speedTable: table } : {}), ...(trim !== null ? { trim: Math.round(trim * 1000) / 1000 } : {}) },
+      profilePatch: { ...(table ? { speedTable: table } : {}), ...(trim !== null ? { trim, trimTable } : {}) },
+    };
+  },
+};
+
+// ---------------------------------------------------------------- T3.7
+
+type T37Data = {
+  speed: number; durMs: number; l: number; r: number; trimUsed: number; trackWidthCm: number;
+  run: StraightRun;
+};
+
+export const T3_7: TestDefinition = {
+  id: 'T3.7',
+  group: 'Motion',
+  title: 'Straight check (tune trim)',
+  setup: 'Drives straight ahead for 1.5 s exactly as the Drive tab would at this speed (deadband and trim applied), so you can check the trim and correct it. Run it until the sideways drift is under a couple of cm.',
+  params: [
+    { key: 'speed', label: 'Speed (command)', type: 'number', default: 40 },
+    { key: 'durationS', label: 'Drive time', type: 'number', default: 1.5, unit: 's' },
+  ],
+  needs: { robot: true, motion: true, tracking: true },
+  maxMs: 120_000,
+  async run(ctx, p) {
+    const speed = Number(p.speed);
+    const durMs = Number(p.durationS) * 1000;
+    const profile = ctx.profile;
+    const cfg = {
+      speedCap: speed, expo: 0, trim: profile?.trim ?? 0, trimTable: profile?.trimTable, deadzone: 0,
+      deadband: ctx.settings.drive.useDeadband ? profile?.deadband : undefined,
+    };
+    const { l, r } = arcade(0, 1, cfg);
+    const trimUsed = trimAt(cfg, speed);
+    const run = await straightRun(ctx, speed, durMs, `MS,${l},${r}`);
+    const data: T37Data = { speed, durMs, l, r, trimUsed, trackWidthCm: profile?.trackWidthCm ?? DEFAULT_TRACK_WIDTH_CM, run };
+    ctx.sample({ speed, l, r, trimUsed, along: run.along, side: run.side });
+    return data;
+  },
+  summarize(raw, _p, { profile }) {
+    const d = raw as T37Data;
+    const residual = runTrim(d.run, d.trackWidthCm);
+    // The run already had trimUsed applied; what is left over adds to it.
+    const next = residual === null ? null : clampTrim((1 + d.trimUsed) * (1 + residual) - 1);
+    return {
+      values: {
+        speed: d.speed, sent: `MS,${d.l},${d.r}`, trimUsedPct: r1(d.trimUsed * 100), driftCm: d.run.side,
+        distanceCm: d.run.along, newTrimPct: next === null ? null : r1(next * 100),
+      },
+      tables: [],
+      notes: [
+        residual === null
+          ? `Run too short to judge (needs ${MIN_TRIM_RUN_CM} cm): raise the speed or drive time.`
+          : Math.abs(d.run.side ?? 0) <= 2
+            ? `Straight enough: ${d.run.side} cm drift over ${d.run.along} cm.`
+            : `Drifted ${d.run.side} cm over ${d.run.along} cm with ${r1(d.trimUsed * 100)} % trim: saving sets ${r1(next! * 100)} % at speed ${d.speed}. Run again to check.`,
+      ],
+      profilePatch: next === null ? undefined : { trimTable: upsertTable(profile?.trimTable, { cmd: d.speed, trim: next }), ...(profile?.trimTable?.length ? {} : { trim: next }) },
     };
   },
 };
@@ -423,6 +492,10 @@ export const T3_3: TestDefinition = {
 
 // ---------------------------------------------------------------- T3.4
 
+// People count turns more easily than degrees (one spin at speed 30 is already more than a full turn).
+const TURNS_HINT = 'How many turns did it make? Count full turns and estimate the rest: 1.25 = one and a quarter.';
+const TURNS_FIELD: PromptField = { key: 'turns', label: 'Turns', type: 'number', unit: 'turns', hint: '1 turn = 360°' };
+
 type SpinRun = { side: 'L' | 'R'; speed: number; deg: number | null; by: 'camera' | 'manual' };
 type T34Data = { measuredBy: 'camera' | 'manual'; durMs: number; runs: SpinRun[] };
 
@@ -430,7 +503,7 @@ export const T3_4: TestDefinition = {
   id: 'T3.4',
   group: 'Motion',
   title: 'Spin rate',
-  setup: 'Robot on the mat with room to spin. L,s and R,s for 1 s at each speed. Camera needs both markers for heading; otherwise enter the angle turned (count full turns).',
+  setup: 'Robot on the mat with room to spin. L,s and R,s for 1 s at each speed. Camera needs both markers for heading; otherwise enter how many turns it made (e.g. 1.25).',
   params: [
     { key: 'speeds', label: 'Speeds', type: 'numbers', default: [30, 50, 70, 100] },
     { key: 'durationS', label: 'Spin time', type: 'number', default: 1, unit: 's' },
@@ -457,17 +530,15 @@ export const T3_4: TestDefinition = {
         const un = unwrapDeg(hs);
         deg = un.length > 2 && wellTracked(cam, c, durMs) ? Math.abs(un[un.length - 1] - un[0]) : null;
         if (deg === null) {
-          const m = await manual(ctx, `${side},${speed}: angle`, `${LOST_NOTE} Total angle turned, including full turns.`, [{ key: 'deg', label: 'Angle', type: 'number', unit: '°' }]);
-          deg = Number.isFinite(m.deg) ? Math.abs(m.deg) : null;
+          const m = await manual(ctx, `${side},${speed}: angle`, `${LOST_NOTE} ${TURNS_HINT}`, [TURNS_FIELD]);
+          deg = Number.isFinite(m.turns) ? Math.abs(m.turns) * 360 : null;
         }
       } else {
         await ctx.link.send(`${side},${speed}`);
         await ctx.sleep(durMs);
         await ctx.link.stop();
-        const m = await manual(ctx, `${side},${speed}: angle`, 'Total angle turned, including full turns (e.g. 1.5 turns = 540°).', [
-          { key: 'deg', label: 'Angle', type: 'number', unit: '°' },
-        ]);
-        deg = Number.isFinite(m.deg) ? Math.abs(m.deg) : null;
+        const m = await manual(ctx, `${side},${speed}: angle`, TURNS_HINT, [TURNS_FIELD]);
+        deg = Number.isFinite(m.turns) ? Math.abs(m.turns) * 360 : null;
       }
       const run: SpinRun = { side, speed, deg: deg === null ? null : r1(deg), by: cam ? 'camera' : 'manual' };
       data.runs.push(run);
@@ -577,4 +648,4 @@ export const T3_5: TestDefinition = {
   },
 };
 
-export const MOTION_TESTS = [T3_1, T3_2, T3_3, T3_4, T3_5, T3_6];
+export const MOTION_TESTS = [T3_1, T3_2, T3_7, T3_3, T3_4, T3_5, T3_6];

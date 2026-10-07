@@ -126,10 +126,26 @@ export class TrackingPipeline implements PoseSource {
     };
   }
 
+  /**
+   * Whether frames of this size match the calibration's picture shape. Rotating
+   * the phone (portrait ↔ landscape) or changing the frame shape invalidates the
+   * calibration, and tracking with it would put the robot in the wrong place.
+   */
+  aspectMatches(w: number, h: number): boolean {
+    const cal = this.cfg?.calibration;
+    if (!cal) return false;
+    return Math.abs(w / h - cal.imageWidth / cal.imageHeight) < 0.03;
+  }
+
+  /** Set while frames don't match the calibration (see aspectMatches). */
+  calibrationMismatch = false;
+
   /** Process one frame here. Returns the result, or undefined when not tracking. */
   process(frame: Frame): TrackResult | undefined {
     this.lastFrame = frame;
     if (!this.tracking || !this.cfg) return undefined;
+    this.calibrationMismatch = !this.aspectMatches(frame.width, frame.height);
+    if (this.calibrationMismatch) return undefined;
     if (!this.tracker || frame.width !== this.frameW || frame.height !== this.frameH) {
       this.tracker = new Tracker(this.trackerConfig(frame.width, frame.height));
       this.frameW = frame.width;

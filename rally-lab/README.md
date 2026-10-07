@@ -65,11 +65,13 @@ the robot profile with **Save to profile**; everything is in the log either way.
 3. **Sensors, robot on the mat**: T2.1 for every surface label (lane blue end, purple, pink end,
    white border, black background, checkered, start line, bridge deck, floor). The cross-label
    table answers "does the lane read white or black to the IR sensors?". Then T2.3–T2.5.
-4. **Motion**: T3.1 deadband → T3.2 straight speed (saves the speed table and suggests trim) →
-   T3.4 spin rate → T3.5 arcs (track width, needs T3.2) → T3.6 a few times over the day.
-   Without the camera they ask for tape-measure values.
-5. **Camera, phone on a tripod at the mat's edge**: Camera → Setup (pick the widest camera, lock
-   exposure) → Calibrate (capture still, tap the 4 mat corners, enter the taped mat size, save) →
+4. **Motion**: T3.1 deadband → T3.2 straight speed (saves the speed table and a trim per speed) →
+   **T3.7 straight check** until it drifts less than ~2 cm (it drives exactly like the Drive tab and
+   corrects the trim) → T3.4 spin rate (enter turns) → T3.5 arcs (track width, needs T3.2) → T3.6 a
+   few times over the day. Without the camera they ask for tape-measure values.
+5. **Camera, phone fixed at the mat's edge, in landscape** (a tripod, or taped to the back of a deck
+   chair or a stack of boxes; it only has to stay still; a bumped phone recalibrates in under a
+   minute): Camera → Setup (pick the widest camera, frame shape 4:3, lock exposure) → Calibrate (capture still, tap the 4 mat corners, enter the taped mat size, save) →
    Map (check the class mask, tap landmarks: at least **start/finish**) → Markers (Light up A and
    B, tap A on the headlights, B on the underglow) → Track. Then T4.2 calibration check (max error
    under 2 cm), T4.3 tracking quality, T4.4 frame timing, T4.5 LED latency (apply it to settings),
@@ -77,6 +79,10 @@ the robot profile with **Save to profile**; everything is in the log either way.
    Rerun T3.x with tracking on for camera-measured motion.
 6. **Export**: Data → Export this session (share sheet or download), or **Copy report** to paste
    `report.md` into a chat with a coding agent.
+
+Avoid `TONE` longer than ~200 ms and `DISP`/`ICON` while driving: a 500 ms tone dropped the
+Bluetooth link on a real robot, and blocking commands freeze motor updates (see
+[field notes](../docs/field-notes-2026-10-07.md)).
 
 ## What the real mat looks like to the camera
 

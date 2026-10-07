@@ -319,11 +319,19 @@ export const T1_4: TestDefinition = {
 
 // ---------------------------------------------------------------- T1.5
 
+/** Say so when the link dropped during the run, and after which command. */
+function linkDropNote(samples: BlockSample[]): string[] {
+  const i = samples.findIndex((s) => s.status === 'cancelled' || s.status === 'rejected');
+  if (i < 0) return [];
+  return [`The Bluetooth link dropped right after ${samples[i].cmd} (rep ${samples[i].rep + 1}); results from there on are missing. Avoid that command in the race.`];
+}
+
 /** Estimated blocks below this are link jitter, not firmware blocking. */
 const NOT_BLOCKING_MS = 25;
 
 export const T15_COMMANDS = [
-  'ICON,HAPPY', 'HORN', 'BEEP', 'TONE,440,500', 'DISP,A', 'DISP,HELLO', 'HL,255,255,255', 'UG,0,255,0',
+  // A 500 ms tone once dropped the Bluetooth link on a real robot (puguz, 7 Oct), so the default is short.
+  'ICON,HAPPY', 'HORN', 'BEEP', 'TONE,440,150', 'DISP,A', 'DISP,HELLO', 'HL,255,255,255', 'UG,0,255,0',
   'HO', 'CLS', '?DIST', '?LINE', '?ACCEL', '?LIGHT', '?TEMP',
 ];
 
@@ -336,7 +344,7 @@ export const T1_5: TestDefinition = {
   title: 'Blocking commands',
   setup: 'Robot connected (it will beep, show icons and scroll text; lights flash). Sends each command, then PING at once, and measures how long the PONG is delayed.',
   params: [
-    { key: 'commands', label: 'Commands', type: 'multi', default: T15_COMMANDS, options: [...T15_COMMANDS, '?COMPASS'] },
+    { key: 'commands', label: 'Commands', type: 'multi', default: T15_COMMANDS, options: [...T15_COMMANDS, 'TONE,440,500', '?COMPASS'], help: 'TONE,440,500 once dropped the Bluetooth link.' },
     { key: 'repeats', label: 'Repeats', type: 'number', default: 2, min: 1, max: 5 },
     { key: 'timeoutMs', label: 'PONG timeout', type: 'number', default: 9000, unit: 'ms' },
   ],
@@ -409,8 +417,9 @@ export const T1_5: TestDefinition = {
       const cmd = [...byCmd.keys()].find((c) => c === name || c.startsWith(`${name},`));
       if (cmd) put(name, est(cmd));
     }
-    const tone = est('TONE,440,500');
-    if (tone !== null) put('TONE', Math.max(0, tone - 500));
+    const toneCmd = [...byCmd.keys()].find((c) => c.startsWith('TONE,'));
+    const tone = toneCmd ? est(toneCmd) : null;
+    if (toneCmd && tone !== null) put('TONE', Math.max(0, tone - (parseInt(toneCmd.split(',')[2], 10) || 0)));
     const dA = est('DISP,A');
     const dH = est('DISP,HELLO');
     if (dA !== null && dH !== null) {
@@ -432,6 +441,7 @@ export const T1_5: TestDefinition = {
         rows,
       }],
       notes: [
+        ...linkDropNote(d.samples),
         `Estimated block = PONG delay − PING baseline (${d.pingBaseMs} ms). Other commands under ${NOT_BLOCKING_MS} ms are treated as not blocking.`,
         'Saving to the profile replaces the default blocking table for this robot.',
       ],

@@ -204,6 +204,8 @@ class CameraController implements CameraControl {
     };
     src.bitmapSink = (bmp, t) => {
       if (this.workerBusy || !pipe.config) return false;
+      pipe.calibrationMismatch = !pipe.aspectMatches(bmp.width, bmp.height);
+      if (pipe.calibrationMismatch) return false;
       const key = `${pipe.configVersion}:${bmp.width}x${bmp.height}`;
       if (key !== this.workerCfg) {
         const msg: ToWorker = { type: 'config', version: pipe.configVersion, cfg: pipe.trackerConfig(bmp.width, bmp.height) };

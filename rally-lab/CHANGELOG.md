@@ -95,3 +95,19 @@
 - The mock robot's line sensors read the calibrated track mask when there is one.
 - Processing width in Settings; README with a track-day checklist, the measured mat facts, the
   log format and known limits.
+
+## Field fixes (2026-10-07, after the first session with robot puguz)
+
+- Drive: the stick now starts at each wheel's measured deadband (commands below ~15–20 don't move
+  a wheel, which made the stick feel dead and then twitchy), a centre dead zone, a turn
+  sensitivity slider, gentler defaults (cap 50, expo 0.3, turn 0.5), and trim per speed.
+- T3.2 saves a trim per speed; new **T3.7 straight check** drives exactly like the Drive tab and
+  corrects the trim from the measured drift.
+- T3.4 asks for turns instead of degrees.
+- Tests abort when the robot disconnects; a test waiting for a typed measurement survives the page
+  being hidden; the hard maximum doesn't count time spent waiting for the user.
+- T1.5 uses `TONE,440,150` (a 500 ms tone dropped the link) and says when the link dropped.
+- Camera: 4:3 frames by default, a portrait warning, landscape allowed in the installed app,
+  tracking pauses when the picture shape no longer matches the calibration, white-balance and
+  focus lock retry with in-range values, hints when Chrome hides the ultra-wide camera.
+- docs/field-notes-2026-10-07.md: what the logs measured.

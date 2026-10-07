@@ -34,7 +34,19 @@ export type Settings = {
   /** Grab pixels and track in a Web Worker (real camera only). */
   trackInWorker: boolean;
   mockRobot: boolean;
-  drive: { speedCap: number; expo: number; sendHz: number; tiltMaxDeg: number; lineOverlay: boolean };
+  drive: {
+    speedCap: number;
+    expo: number;
+    /** How strongly the stick turns (0..1). */
+    turnGain: number;
+    /** Stick travel around the centre that counts as zero. */
+    deadzone: number;
+    /** Map the stick onto [deadband, cap] using the robot profile's deadband. */
+    useDeadband: boolean;
+    sendHz: number;
+    tiltMaxDeg: number;
+    lineOverlay: boolean;
+  };
 };
 
 export const DEFAULT_POLLER_PRESETS: PollerPreset[] = [
@@ -56,8 +68,9 @@ export const DEFAULT_SETTINGS: Settings = {
   pollerPresets: DEFAULT_POLLER_PRESETS,
   matWidthCm: 300,
   matHeightCm: 250,
+  // 4:3 uses the whole sensor; 16:9 crops it (and in portrait, to a narrow strip).
   cameraWidth: 1280,
-  cameraHeight: 720,
+  cameraHeight: 960,
   cameraFps: 30,
   procWidth: 640,
   mmPerPx: 5,
@@ -69,7 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
   trackInWorker: false,
   mockRobot: false,
   // sendHz 0: send at the write gap (minWriteGapMs)
-  drive: { speedCap: 70, expo: 0.4, sendHz: 0, tiltMaxDeg: 30, lineOverlay: true },
+  drive: { speedCap: 50, expo: 0.3, turnGain: 0.5, deadzone: 0.06, useDeadband: true, sendHz: 0, tiltMaxDeg: 30, lineOverlay: true },
 };
 
 /** Fill in fields missing from older stored settings. */

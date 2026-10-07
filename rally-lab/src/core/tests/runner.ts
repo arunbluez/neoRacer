@@ -39,12 +39,18 @@ export type RunnerState = {
 
 export class TestRunner {
   private current: { def: TestDefinition; run: TestRun; token: CancelToken; progress: Progress } | null = null;
+  private asking = 0;
   private listeners = new Set<(s: RunnerState) => void>();
   /** Runs finished in this session, newest first. */
   history: TestRun[] = [];
   private counter = 0;
 
   constructor(private readonly deps: RunnerDeps) {}
+
+  /** True while the running test only waits for the user to answer a prompt (the robot is not moving). */
+  get waitingForUser(): boolean {
+    return this.current !== null && this.asking > 0;
+  }
 
   get running(): boolean {
     return this.current !== null;
@@ -101,7 +107,26 @@ export class TestRunner {
     const savedSched = { ...link.scheduler.config };
     const openPrompts = new Set<{ close(): void }>();
     let kept: unknown = null;
-    const hardStop = setTimeout(() => token.abort(`hard maximum of ${Math.round(def.maxMs / 1000)} s reached`), def.maxMs);
+    // The hard maximum counts active time only: waiting for the user to type a measurement doesn't use it up.
+    let budgetMs = def.maxMs;
+    let armedAt = clock.now();
+    let hardStop: ReturnType<typeof setTimeout> | null = null;
+    const armHardStop = () => {
+      armedAt = clock.now();
+      hardStop = setTimeout(() => token.abort(`hard maximum of ${Math.round(def.maxMs / 1000)} s reached`), Math.max(0, budgetMs));
+    };
+    const pauseHardStop = () => {
+      if (hardStop !== null) clearTimeout(hardStop);
+      hardStop = null;
+      budgetMs -= clock.now() - armedAt;
+    };
+    armHardStop();
+    // A test that drives the robot can't go on without it.
+    const offLink = def.needs.robot
+      ? link.onState((s) => {
+        if (s === 'disconnected') token.abort('robot disconnected');
+      })
+      : () => {};
 
     // After STOP the test may not send anything but S, whatever its code does next.
     const guarded = new Proxy(link, {
@@ -148,10 +173,14 @@ export class TestRunner {
       ask: async (req): Promise<PromptResponse> => {
         token.throwIfAborted();
         const h = ctx.ui.prompt(req);
+        this.asking++;
+        pauseHardStop();
         try {
           return await abortable(h.result, token);
         } finally {
+          this.asking--;
           h.close();
+          if (!token.aborted) armHardStop();
         }
       },
       previousRuns: (testId) => this.history.filter((r) => r.testId === testId),
@@ -176,7 +205,8 @@ export class TestRunner {
         run.error = errorMessage(err);
       }
     } finally {
-      clearTimeout(hardStop);
+      if (hardStop !== null) clearTimeout(hardStop);
+      offLink();
       for (const p of openPrompts) p.close();
       if (def.needs.motion || def.needs.wheelsUp) void link.stop();
       link.scheduler.setConfig(savedSched);

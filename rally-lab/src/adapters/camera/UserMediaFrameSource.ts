@@ -206,17 +206,35 @@ export class UserMediaFrameSource implements CameraSource {
     } else if (caps.exposureCompensation !== undefined) {
       await tryApply('exposure', { exposureCompensation: cur.exposureCompensation ?? 0 });
     } else failed.exposure = 'not supported';
+    // While in auto mode some phones report colorTemperature / focusDistance as 0, which is out of
+    // range for a manual setting: try the mode alone first, then with a value inside the range.
+    const inRange = (key: string, value: unknown, fallback: number) => {
+      const r = caps[key] as { min?: number; max?: number } | undefined;
+      const v = typeof value === 'number' && value > 0 ? value : fallback;
+      return r?.min !== undefined && r.max !== undefined ? Math.min(r.max, Math.max(r.min, v)) : v;
+    };
+    const tryEach = async (name: string, options: Record<string, unknown>[]) => {
+      for (const c of options) {
+        await tryApply(name, c);
+        if (applied[name]) {
+          delete failed[name];
+          return;
+        }
+      }
+    };
     if (modes('whiteBalanceMode').includes('manual')) {
-      const c: Record<string, unknown> = { whiteBalanceMode: 'manual' };
-      if (cur.colorTemperature !== undefined) c.colorTemperature = cur.colorTemperature;
-      await tryApply('whiteBalance', c);
+      await tryEach('whiteBalance', [
+        { whiteBalanceMode: 'manual' },
+        { whiteBalanceMode: 'manual', colorTemperature: inRange('colorTemperature', cur.colorTemperature, 4500) },
+      ]);
     } else failed.whiteBalance = 'not supported';
-    if (modes('focusMode').includes('manual')) {
-      const c: Record<string, unknown> = { focusMode: 'manual' };
-      if (cur.focusDistance !== undefined) c.focusDistance = cur.focusDistance;
-      await tryApply('focus', c);
-    } else if (modes('focusMode').includes('single-shot')) await tryApply('focus', { focusMode: 'single-shot' });
-    else failed.focus = 'not supported';
+    const focusModes = modes('focusMode');
+    if (focusModes.includes('manual') || focusModes.includes('single-shot')) {
+      await tryEach('focus', [
+        ...(focusModes.includes('manual') ? [{ focusMode: 'manual' }, { focusMode: 'manual', focusDistance: inRange('focusDistance', cur.focusDistance, 2) }] : []),
+        ...(focusModes.includes('single-shot') ? [{ focusMode: 'single-shot' }] : []),
+      ]);
+    } else failed.focus = 'not supported';
     return { applied, failed, settings: this.settings() };
   }
 }

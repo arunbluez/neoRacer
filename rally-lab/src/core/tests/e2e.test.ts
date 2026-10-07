@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drive, makeLab } from '../testing/labHarness';
+import { autoUi, drive, makeLab } from '../testing/labHarness';
 import { defaultParams } from './types';
 import { T1_1, T1_2, T1_3, T1_4, T1_5, T1_6 } from './linkTests';
 import { T2_1 } from './sensorTests';
+import { T3_2 } from './motionTests';
 
 describe('link tests against the mock robot', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -97,5 +98,31 @@ describe('link tests against the mock robot', () => {
     // the mock starts on the lane, which reads white by default
     expect(run.summary!.values.majorityCode).toBe(0);
     expect(run.summary!.profilePatch!.surfaces!['lane blue end'].code).toBe(0);
+  });
+
+  it('aborts a robot test when the link drops', async () => {
+    const { lab, mock } = await makeLab();
+    const p = lab.runner.run(T1_1, { ...defaultParams(T1_1), count: 500 });
+    await vi.advanceTimersByTimeAsync(800);
+    mock.simulateDrop();
+    const run = await drive(p);
+    expect(run.status).toBe('aborted');
+    expect(run.error).toBe('robot disconnected');
+  });
+
+  it('keeps a test that waits for a typed measurement when the page is hidden', async () => {
+    const ui = autoUi(undefined, 3000); // the user takes 3 s to answer each prompt
+    const { lab } = await makeLab({ ui });
+    const p = lab.runner.run(T2_1, defaultParams(T2_1));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(lab.runner.waitingForUser).toBe(false); // T2.1 asks nothing
+    await drive(p);
+    const p2 = lab.runner.run(T3_2, { ...defaultParams(T3_2), speeds: [50] });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(lab.runner.waitingForUser).toBe(true); // "Place the robot"
+    lab.onHidden();
+    lab.onVisible();
+    const run = await drive(p2);
+    expect(run.status).toBe('done');
   });
 });
