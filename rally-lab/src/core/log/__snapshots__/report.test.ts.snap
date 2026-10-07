@@ -34,7 +34,7 @@ Times are ms unless stated; distances cm; mat origin top-left, x right, y down. 
 - At: 2026-10-07T10:15:20.000Z, 9 s
 - Params: \`{"commands":["ICON,HAPPY","HORN","PING"],"repeats":1,"timeoutMs":9000}\`
 - Summary: pingBaseMs = 30, block_ICON = 623, block_HORN = 206
-- Estimated block = PONG delay − PING baseline (30 ms). Values under 15 ms are treated as not blocking.
+- Estimated block = PONG delay − PING baseline (30 ms). Other commands under 25 ms are treated as not blocking.
 - Saving to the profile replaces the default blocking table for this robot.
 
 **PONG delay after each command (ms)**
