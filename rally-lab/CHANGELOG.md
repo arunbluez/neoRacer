@@ -77,3 +77,21 @@
   serpentine, arrows, lettering, ramps, bridge, cones), default class thresholds are tuned to
   the real colours (with a regression test on a rectified 1 cm/px picture of the mat), and
   marker B defaults to cyan (hues 80–210° never occur on the mat).
+
+## M4 — Polish (2026-10-07)
+
+- Already in from earlier milestones: T1.7 soak, T2.6 compass (guarded), landmarks,
+  speed-coloured trail, storage meter.
+- Tracking in a Web Worker (Data → Settings → "Track in a Web Worker"): frames go to the worker
+  as transferred ImageBitmaps, so neither the pixel read-back nor the tracker runs on the main
+  thread. Frame-grab time is now measured and reported (`cam.stats.grabMs`, T4.4).
+- Fix: the camera preview is parked in the page instead of being detached when no screen shows
+  it, so tracking keeps running while you use the Tests or Drive tab (a detached video pauses).
+- Tracker merges blobs of one marker that lie within 8 cm on the mat (both headlights), so the
+  position no longer jumps between the two lights; camera trim suggestions now match the
+  simulator's true wheel mismatch.
+- Motion tests fall back to manual entry when the camera loses the robot mid-run; trim is weighted
+  by run length and ignores runs under 25 cm.
+- The mock robot's line sensors read the calibrated track mask when there is one.
+- Processing width in Settings; README with a track-day checklist, the measured mat facts, the
+  log format and known limits.

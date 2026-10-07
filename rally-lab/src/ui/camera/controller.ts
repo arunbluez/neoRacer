@@ -6,16 +6,19 @@ import { MockTransport } from '../../adapters/ble/MockTransport';
 import { decodeImage, encodeImage } from '../../adapters/camera/imageIo';
 import { SimFrameSource } from '../../adapters/camera/SimFrameSource';
 import type { CameraSource, LockResult } from '../../adapters/camera/types';
+import type { FromWorker, ToWorker } from '../../adapters/camera/trackWorker';
 import { dumpAllCapabilities, UserMediaFrameSource } from '../../adapters/camera/UserMediaFrameSource';
 import type { CameraControl, MarkerProbe } from '../../core/tests/camera';
 import type { Frame } from '../../core/types';
 import { errorMessage } from '../../core/util/async';
 import type { TrackCalibration } from '../../core/vision/calibration';
-import { classesToImage, classifyImage, DEFAULT_CLASS_THRESHOLDS, type ClassThresholds } from '../../core/vision/color';
+import type { TrackMask } from '../../core/sim/track';
+import { classesToImage, classifyImage, DEFAULT_CLASS_THRESHOLDS, PIXEL_CLASS, type ClassThresholds } from '../../core/vision/color';
 import { TrackingPipeline } from '../../core/vision/pipeline';
 import { rectify, type ImageBuf } from '../../core/vision/rectify';
 import { useApp } from '../appStore';
-import { clock, getLab, getSimTrack, store } from '../lab';
+import { parkPreview } from './views';
+import { clock, getLab, getSimTrack, mockMask, store } from '../lab';
 
 const ACTIVE_KEY = 'rally-lab.activeCalibration';
 
@@ -33,6 +36,9 @@ class CameraController implements CameraControl {
   error?: string;
   pointRequest?: PointRequest;
   private frameTimes: number[] = [];
+  private worker: Worker | null = null;
+  private workerBusy = false;
+  private workerCfg = '';
   private off?: () => void;
   private fpsTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -82,7 +88,26 @@ class CameraController implements CameraControl {
       }
     }
     getLab().setCalibration(cal);
+    this.applyMaskToMock();
     this.bump();
+  }
+
+  /** The calibrated track as line-sensor surfaces for the mock robot. */
+  trackMask(): TrackMask | undefined {
+    const cal = this.calibration;
+    if (!cal || !this.map) return undefined;
+    const { classes } = classifyImage(this.map, cal.classThresholds ?? DEFAULT_CLASS_THRESHOLDS);
+    for (let i = 0; i < classes.length; i++) if (classes[i] === PIXEL_CLASS.none) classes[i] = PIXEL_CLASS.offtrack;
+    return { width: this.map.width, height: this.map.height, cmPerPx: (cal.mmPerPx ?? getLab().settings.mmPerPx) / 10, classes };
+  }
+
+  private applyMaskToMock(): void {
+    const mock = getLab().mockTransport;
+    const mask = this.trackMask();
+    if (mock instanceof MockTransport && mask) {
+      mock.world.mask = mask;
+      getLab().logger.log('app', { event: 'mock', detail: `line sensors read the mask of ${this.calibration?.id}` });
+    }
   }
 
   async start(deviceId: string | 'sim'): Promise<void> {
@@ -106,6 +131,7 @@ class CameraController implements CameraControl {
     }
     this.error = undefined;
     this.source = src;
+    parkPreview(src.preview);
     const pipe = this.ensurePipeline();
     this.off = src.onFrame((f) => {
       this.lastFrame = f;
@@ -129,6 +155,7 @@ class CameraController implements CameraControl {
     this.off?.();
     this.off = undefined;
     this.source?.stop();
+    this.source?.preview.remove();
     if (this.source) getLab().logger.log('app', { event: 'camera', detail: 'stopped' });
     this.source = undefined;
     if (this.fpsTimer !== null) clearInterval(this.fpsTimer);
@@ -148,6 +175,55 @@ class CameraController implements CameraControl {
   }
 
   /** Start tracking with the active calibration and the calibrated markers. */
+  /** Size of the frames being processed, from either path. */
+  get frameSize(): { width: number; height: number } | undefined {
+    return this.worker ? this.pipeline?.frameMeta : this.lastFrame;
+  }
+
+  get workerActive(): boolean {
+    return this.worker !== null;
+  }
+
+  private startWorker(src: UserMediaFrameSource, pipe: TrackingPipeline): void {
+    this.stopWorker();
+    const worker = new Worker(new URL('../../adapters/camera/trackWorker.ts', import.meta.url), { type: 'module' });
+    this.worker = worker;
+    this.workerBusy = false;
+    this.workerCfg = '';
+    worker.onmessage = (e: MessageEvent<FromWorker>) => {
+      const m = e.data;
+      this.workerBusy = false;
+      this.frameTimes.push(m.t);
+      if (m.res && m.version === pipe.configVersion) {
+        pipe.ingest({ width: m.width, height: m.height, tCaptureMs: m.t, grabMs: m.grabMs }, m.res, m.procMs, m.probe);
+      }
+    };
+    worker.onerror = (e) => {
+      getLab().logger.log('app', { event: 'error', detail: `tracking worker: ${e.message}` });
+      this.stopWorker();
+    };
+    src.bitmapSink = (bmp, t) => {
+      if (this.workerBusy || !pipe.config) return false;
+      const key = `${pipe.configVersion}:${bmp.width}x${bmp.height}`;
+      if (key !== this.workerCfg) {
+        const msg: ToWorker = { type: 'config', version: pipe.configVersion, cfg: pipe.trackerConfig(bmp.width, bmp.height) };
+        worker.postMessage(msg);
+        this.workerCfg = key;
+      }
+      this.workerBusy = true;
+      const msg: ToWorker = { type: 'frame', bitmap: bmp, t, probe: pipe.wantsProbe };
+      worker.postMessage(msg, [bmp]);
+      return true;
+    };
+    getLab().logger.log('app', { event: 'tracking', detail: 'worker on' });
+  }
+
+  private stopWorker(): void {
+    if (this.source instanceof UserMediaFrameSource) this.source.bitmapSink = null;
+    this.worker?.terminate();
+    this.worker = null;
+  }
+
   startTracking(): void {
     const lab = getLab();
     const cal = this.calibration;
@@ -163,6 +239,8 @@ class CameraController implements CameraControl {
       predictMs: lab.settings.trackingLatencyMs,
     });
     pipe.start();
+    if (lab.settings.trackInWorker && this.source instanceof UserMediaFrameSource) this.startWorker(this.source, pipe);
+    else this.stopWorker();
     lab.pose = pipe;
     lab.logger.log('app', { event: 'tracking', detail: { calibrationId: cal.id, markerA: a, markerB: lab.settings.markerB.hsv ?? null } });
     this.bump();
@@ -170,6 +248,7 @@ class CameraController implements CameraControl {
 
   stopTracking(): void {
     const lab = getLab();
+    this.stopWorker();
     if (this.pipeline?.tracking) lab.logger.log('app', { event: 'tracking', detail: 'stopped' });
     this.pipeline?.stop();
     if (lab.pose === this.pipeline) lab.pose = undefined;
@@ -251,4 +330,5 @@ class CameraController implements CameraControl {
 }
 
 export const cameraController = new CameraController();
+mockMask.provide = () => cameraController.trackMask();
 if (import.meta.env.DEV) (window as unknown as { __cc?: CameraController }).__cc = cameraController;

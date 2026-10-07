@@ -275,10 +275,15 @@ function SettingsPanel() {
           <NumberSetting label="Camera width" unit="px" value={s.cameraWidth} onChange={(v) => set({ cameraWidth: v })} />
           <NumberSetting label="Camera height" unit="px" value={s.cameraHeight} onChange={(v) => set({ cameraHeight: v })} />
           <NumberSetting label="Camera fps" value={s.cameraFps} onChange={(v) => set({ cameraFps: v })} />
+          <NumberSetting label="Processing width" unit="px" value={s.procWidth} onChange={(v) => set({ procWidth: Math.max(160, Math.round(v)) })} />
           <NumberSetting label="Map mm per px" value={s.mmPerPx} onChange={(v) => set({ mmPerPx: Math.max(1, v) })} />
           <NumberSetting label="Tracking latency" unit="ms" value={s.trackingLatencyMs} onChange={(v) => set({ trackingLatencyMs: v })} />
           <NumberSetting label="Min blob area" unit="px" value={s.minBlobAreaPx} onChange={(v) => set({ minBlobAreaPx: v })} />
         </div>
+        <label className="row" style={{ marginBottom: 10 }}>
+          <input type="checkbox" checked={s.trackInWorker} onChange={(e) => set({ trackInWorker: e.target.checked })} />
+          <span>Track in a Web Worker (real camera; use when T4.4 shows grab + tracking above 15 ms)</span>
+        </label>
         <JsonSetting label="Marker A (front)" value={s.markerA} onChange={(v) => set({ markerA: v })} />
         <JsonSetting label="Marker B (centre)" value={s.markerB} onChange={(v) => set({ markerB: v })} />
       </div>

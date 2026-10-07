@@ -7,7 +7,7 @@ import { DexieLogStore, IndexedDbSink, requestPersistentStorage } from '../adapt
 import { DevSync } from '../adapters/storage/devSync';
 import { loadLastRobotId, loadSettings, saveLastRobotId, saveSettings } from '../adapters/storage/localSettings';
 import { Lab } from '../core/lab';
-import { makeSyntheticTrack } from '../core/sim/track';
+import { makeSyntheticTrack, type TrackMask } from '../core/sim/track';
 import { SimWorld } from '../core/sim/world';
 import type { PromptHandle, PromptRequest, PromptResponse, TestUi } from '../core/tests/types';
 import type { Clock } from '../core/types';
@@ -60,6 +60,9 @@ export const labUi: TestUi = {
 };
 
 let simTrack: ReturnType<typeof makeSyntheticTrack> | null = null;
+
+/** Set by the camera layer: the calibrated track mask, which the mock's line sensors read when present. */
+export const mockMask: { provide: (() => TrackMask | undefined) | null } = { provide: null };
 export function getSimTrack() {
   return (simTrack ??= makeSyntheticTrack({ cmPerPx: 0.5 }));
 }
@@ -80,7 +83,7 @@ export async function initLab(): Promise<Lab> {
     realTransport: () => real,
     mockTransport: () => {
       const track = getSimTrack();
-      const world = new SimWorld(clock.now(), { mask: track.mask, pose: track.start });
+      const world = new SimWorld(clock.now(), { mask: mockMask.provide?.() ?? track.mask, pose: track.start });
       world.shade = track.bridge;
       return new MockTransport(clock, {}, world);
     },

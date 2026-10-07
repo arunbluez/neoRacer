@@ -80,6 +80,8 @@ export type Frame = {
   height: number;
   data: Uint8ClampedArray;
   tCaptureMs: number;
+  /** Time spent getting the pixels (draw + read back), ms, when the source measures it. */
+  grabMs?: number;
 };
 
 export interface FrameSource {

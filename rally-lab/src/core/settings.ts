@@ -31,6 +31,8 @@ export type Settings = {
   /** Forward prediction for the tracker; defaults from T4.5. */
   trackingLatencyMs: number;
   minBlobAreaPx: number;
+  /** Grab pixels and track in a Web Worker (real camera only). */
+  trackInWorker: boolean;
   mockRobot: boolean;
   drive: { speedCap: number; expo: number; sendHz: number; tiltMaxDeg: number; lineOverlay: boolean };
 };
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   markerB: { source: 'underglow', rgb: { r: 0, g: 255, b: 255 } },
   trackingLatencyMs: 150,
   minBlobAreaPx: 4,
+  trackInWorker: false,
   mockRobot: false,
   drive: { speedCap: 70, expo: 0.4, sendHz: 25, tiltMaxDeg: 30, lineOverlay: true },
 };

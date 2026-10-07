@@ -44,8 +44,8 @@ export function SetupView() {
     }
   };
 
-  const outline = cc.calibration && cc.lastFrame
-    ? matOutline(cc.calibration, 16).map((p) => ({ x: (p.x * cc.lastFrame!.width) / cc.calibration!.imageWidth, y: (p.y * cc.lastFrame!.width) / cc.calibration!.imageWidth }))
+  const outline = cc.calibration && cc.frameSize
+    ? matOutline(cc.calibration, 16).map((p) => ({ x: (p.x * cc.frameSize!.width) / cc.calibration!.imageWidth, y: (p.y * cc.frameSize!.width) / cc.calibration!.imageWidth }))
     : null;
 
   return (

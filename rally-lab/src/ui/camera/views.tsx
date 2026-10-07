@@ -9,6 +9,28 @@ import { cameraController } from './controller';
 
 export type Draw = (g: CanvasRenderingContext2D, scale: number, w: number, h: number) => void;
 
+/**
+ * Where the camera preview lives while no screen shows it. A video removed
+ * from the document is paused and stops delivering frames, which would stop
+ * tracking on other tabs, so it is parked here (tiny, invisible, but rendered).
+ */
+function parking(): HTMLElement {
+  let el = document.getElementById('camera-parking');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'camera-parking';
+    el.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+/** Park a preview element so it keeps playing while no view shows it. */
+export function parkPreview(el: HTMLElement): void {
+  parking().appendChild(el);
+  if (el instanceof HTMLVideoElement && el.paused) void el.play().catch(() => {});
+}
+
 function sizeOverlay(c: HTMLCanvasElement): { w: number; h: number; dpr: number } {
   const dpr = window.devicePixelRatio || 1;
   const w = c.clientWidth;
@@ -36,14 +58,15 @@ export function LiveView({ draw, onTap }: { draw?: Draw; onTap?: (x: number, y: 
     el.style.width = '100%';
     el.style.display = 'block';
     h.prepend(el);
+    if (el instanceof HTMLVideoElement && el.paused) void el.play().catch(() => {});
     return () => {
-      if (el.parentElement === h) h.removeChild(el);
+      if (el.parentElement === h) parkPreview(el);
     };
   }, [src]);
 
   useAnimationFrame(() => {
     const c = overlay.current;
-    const f = cameraController.lastFrame;
+    const f = cameraController.frameSize;
     if (!c || !f) return;
     const { w, h, dpr } = sizeOverlay(c);
     const g = c.getContext('2d')!;
@@ -53,7 +76,7 @@ export function LiveView({ draw, onTap }: { draw?: Draw; onTap?: (x: number, y: 
   }, !!src);
 
   const tap = (e: RPointerEvent) => {
-    const f = cameraController.lastFrame;
+    const f = cameraController.frameSize;
     if (!onTap || !f || !overlay.current) return;
     const r = overlay.current.getBoundingClientRect();
     const s = f.width / r.width;

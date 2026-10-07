@@ -4,7 +4,7 @@ A measurement PWA for the Cutebot (micro:bit V2) over Web Bluetooth, for Chrome 
 It connects to a robot, runs repeatable experiments, tracks the robot with the phone camera,
 and logs every packet and measurement so the race app can be built from measured facts.
 
-It is a lab instrument, not the race app. See the PRD for the full brief.
+It is a lab instrument, not the race app.
 
 ## Run it
 
@@ -20,45 +20,85 @@ npm run dev            # http://localhost:5173
 2. `adb reverse tcp:5173 tcp:5173`
 3. Open `http://localhost:5173` in Chrome on the phone. Chrome treats localhost as secure, so
    Bluetooth, camera and orientation work without HTTPS.
-4. Debug from the laptop at `chrome://inspect`.
+4. Debug from the laptop at `chrome://inspect` (`window.__lab` and `window.__cc` are the lab and
+   camera controller in dev builds).
 
 While the dev server answers, the app posts its log once per second. The header shows the sync
 state (green syncing, grey no dev server, red failing). Files land in `rally-lab/logs/`
 (git-ignored):
 
-- `logs/<sessionId>.jsonl` — every event, one JSON object per line
-- `logs/<sessionId>/session-header.json`, `logs/<sessionId>/tests/<runId>.json`, calibration JSON
-  and images
+- `logs/<sessionId>.jsonl`: every event, one JSON object per line
+- `logs/<sessionId>/session-header.json`, `tests/<runId>.json` (+ per-run files such as
+  `trajectory.json`), `calibration/<id>.json` with the still, map and mask images
 
 ### At the track, untethered
 
-The `Rally Lab` GitHub Actions workflow runs lint, tests and the build on every push to `main`
-(and on pull requests), then deploys `main` to GitHub Pages:
-`https://<owner>.github.io/<repo>/`. To deploy another branch, run the workflow by hand
-(Actions → Rally Lab → Run workflow).
+The `Rally Lab` GitHub Actions workflow runs lint, tests and the build on pushes to `main` and on
+pull requests, then deploys `main` to GitHub Pages: `https://<owner>.github.io/<repo>/`. To deploy
+another branch, run the workflow by hand (Actions → Rally Lab → Run workflow).
 
-One-time setup: Settings → Pages → Source: **GitHub Actions**. If you deploy from a branch other
-than `main`, also allow that branch in Settings → Environments → github-pages.
+One-time setup: Settings → Pages → Source: **GitHub Actions**. To deploy from a branch other than
+`main`, also allow that branch in Settings → Environments → github-pages.
 
-Logs stay in IndexedDB on the phone; export them from the Data tab later. When a new version is
+Logs stay in IndexedDB on the phone; export them from the Data tab. When a new version is
 deployed, the header shows **Reload new version**.
 
 ### Without a robot
 
-Data → Settings → **Mock robot**. The mock emulates `microbitapi.js`: the same parsing, one
-handler at a time with the firmware's blocking times, a 20-byte receive buffer that drops bytes,
-link latency, jitter and loss, and a 2D world with differential-drive motion and line sensors
-that read a synthetic track. The header shows **MOCK** in orange.
+Data → Settings → **Mock robot**. The mock emulates `microbitapi.js`: same parsing, one handler at
+a time with the firmware's blocking times, a 20-byte receive buffer that drops bytes, a queue of
+at most 10 pending commands, link latency, jitter and loss, and a 2D world with differential
+drive (deadband 12, right wheel 3 % slow, 9.2 cm track width) and line sensors on a copy of the
+real mat. On the Camera tab, **Simulated camera** shows the mock robot from the viewpoint of a
+photo of the real track, so calibration, markers, tracking and every T4 test run end to end.
+The header shows **MOCK** in orange.
+
+## A day at the track
+
+Each test runs in under a minute and repeats with **Run again**. Results you want to keep go into
+the robot profile with **Save to profile**; everything is in the log either way.
+
+1. **Connect** (Connect tab). The header shows the robot id and the median round trip.
+2. **Link, robot on a stand**: T1.1 ping baseline → T1.5 blocking commands (save: replaces the
+   firmware estimates in the scheduler) → T1.2 poll rate (save) → T1.3 write gap (save) → T1.4
+   packed writes (save) → T1.6 buffer overflow. Optional: T1.7 soak (3 min).
+3. **Sensors, robot on the mat**: T2.1 for every surface label (lane blue end, purple, pink end,
+   white border, black background, checkered, start line, bridge deck, floor). The cross-label
+   table answers "does the lane read white or black to the IR sensors?". Then T2.3–T2.5.
+4. **Motion**: T3.1 deadband → T3.2 straight speed (saves the speed table and suggests trim) →
+   T3.4 spin rate → T3.5 arcs (track width, needs T3.2) → T3.6 a few times over the day.
+   Without the camera they ask for tape-measure values.
+5. **Camera, phone on a tripod at the mat's edge**: Camera → Setup (pick the widest camera, lock
+   exposure) → Calibrate (capture still, tap the 4 mat corners, enter the taped mat size, save) →
+   Map (check the class mask, tap landmarks: at least **start/finish**) → Markers (Light up A and
+   B, tap A on the headlights, B on the underglow) → Track. Then T4.2 calibration check (max error
+   under 2 cm), T4.3 tracking quality, T4.4 frame timing, T4.5 LED latency (apply it to settings),
+   T4.6 motion latency, and **T4.7 tracked lap** (drive on the Drive tab, Finish in the banner).
+   Rerun T3.x with tracking on for camera-measured motion.
+6. **Export**: Data → Export this session (share sheet or download), or **Copy report** to paste
+   `report.md` into a chat with a coding agent.
+
+## What the real mat looks like to the camera
+
+From a photo of the track (rectified to 300 × 250 cm): lane ~18 cm wide with ~2 cm white borders;
+left straight at x ≈ 18, top straight y ≈ 59, bottom straight y ≈ 187, right side x ≈ 276;
+serpentine legs at x ≈ 165, 195, 222, 248; checkered start/finish at x ≈ 62–72 on the top
+straight; bridge on the bottom-left corner; red cones at the hairpins and inside the bottom
+straight. Under hall lighting the black background reads V ≈ 0.25–0.42, the lane runs blue
+(223°) → pastel purple (295°, S ≈ 0.28) → pink (335°), and **hues 80–210° never occur on the mat**:
+green and cyan make the best markers (the defaults). A 1 cm/px picture of the mat is a test
+fixture (`src/core/vision/fixtures/`) that keeps the class thresholds honest.
 
 ## Commands
 
 | | |
 | --- | --- |
 | `npm run dev` | dev server with `/__log` and `/__artifact` |
-| `npm test` | Vitest unit and end-to-end tests (mock robot) |
+| `npm test` | Vitest: unit tests and end-to-end runs against the mock robot |
 | `npm run lint` | ESLint; blocks DOM, browser globals and React inside `src/core` |
 | `npm run typecheck` | `tsc -b`; `src/core` is checked against plain ES2022 (no DOM) |
-| `npm run build` | type-check and production build with service worker |
+| `npm run verify` | lint + typecheck + tests (what CI runs before the build) |
+| `npm run build` | production build with service worker |
 | `npm run icons` | regenerate the PNG icons |
 
 ## Layout
@@ -67,13 +107,14 @@ that read a synthetic track. The header shows **MOCK** in orange.
 src/core/       portable TypeScript: no DOM, no React (moves to React Native unchanged)
   protocol/     command builders, ASCII codec, reply parser (port of ReactNativeApi.ts)
   link/         write scheduler, reply matcher, blocking table, link stats, poller, RobotLink
-  log/          event types, session ids, logger, report and export
-  tests/        experiment definitions, runner
-  vision/       homography, rectify, colour classify, blob tracker, pose filter
-  model/        robot profile, motion model fits, drive mixing
-  sim/          mock robot: firmware emulation, 2D world, synthetic track
+  log/          event types, sessions, logger, report.md and session.zip
+  tests/        experiment definitions (T1–T4), runner, helpers
+  vision/       homography, rectify, colour classes, blobs, pose filter, tracker, pipeline
+  model/        robot profile, drive mixing, motion fits
+  sim/          mock robot: firmware emulation, 2D world, synthetic copy of the mat
   lab.ts        composition root used by the UI
-src/adapters/   platform code: Web Bluetooth, mock transport, Dexie, dev sync, camera, device
+src/adapters/   platform code: Web Bluetooth, mock transport, Dexie, dev sync, cameras
+                (getUserMedia, simulated, tracking worker), device, share/download
 src/ui/         React screens and components
 vite-plugins/   dev-only /__log and /__artifact endpoints
 ```
@@ -89,11 +130,46 @@ the UI and keeping `src/core` as is.
   `safety` (S; clears motor, jumps the queue), `motor` (latest wins; ML/MR are folded into one
   MS so no wheel update is lost), `query` (unsent duplicates dropped), `light` (one slot per
   light command; HL supersedes HLL/HLR, HO supersedes all), `oneshot` (FIFO), `raw` (FIFO).
-- After a blocking command (`ICON` 600 ms, `HORN` 200, `BEEP` 100, `TONE` its duration, `DISP`
-  (chars × 6 + 5) × 150) every channel but `safety` is held for that time plus 20 ms. T1.5 results
-  in the robot profile override the table.
+- After a blocking command every channel but `safety` is held for its block time plus 20 ms.
 - Replies carry no ids: they are matched first in, first out per type. Round-trip time is reply
-  time minus write-resolved time; queries without a reply after `replyTimeoutMs` (500) count as
-  lost.
+  time minus write-resolved time; queries without a reply after `replyTimeoutMs` (500) are lost.
 - On an unexpected disconnect the link reconnects to the same device with backoff 0.25, 0.5, 1,
-  2 s, at most 10 tries.
+  2 s, at most 10 tries. A page reload needs a tap on Connect.
+- STOP (every screen) sends S through `safety` and aborts any test; a stopped test can send
+  nothing else. Hiding the page sends S and stops tests and pollers. Manual drive uses a dead-man.
+
+## Log and export format
+
+`events.jsonl` holds one event per line: `{ "t": <ms since session start>, "k": <kind>, ... }`.
+
+| Kind | Fields |
+| --- | --- |
+| `ble.tx` | cmd, ch, bytes, tEnq, tSent, tDone (+ packId, mergedFrom, blockMs, err) |
+| `ble.drop` | cmd, ch, status (coalesced / cleared / rejected) |
+| `ble.rx` | raw |
+| `ble.state` | state, reason, durMs, name, id, writeMode |
+| `ble.err` | op, message |
+| `sensor` | type, value, rttMs |
+| `link.stats` | rttMed, rttP95, txps, rxps, lost, errors, queue, busy |
+| `input` | mode, left, right, raw |
+| `cam.stats` | fps, procMs, procP95, grabMs, dropped, detectRate |
+| `cam.pose` | xCm, yCm, headingDeg (filtered), conf, tFrame, procMs, raw {xCm, yCm, headingDeg} |
+| `test.start` / `test.sample` / `test.end` | testId, runId, params, data, summary |
+| `note` | text, tags |
+| `app` | event, detail (session header, settings, profile, camera, errors, visibility, …) |
+
+`session.zip` holds `session.json` (header, robot profile, calibrations, test runs with data and
+summaries), `events.jsonl`, `report.md` (written for a coding agent: per-test sections, profile,
+calibrations, open warnings) and `images/` (calibration still, rectified map, track mask).
+
+## Known limits worth measuring, not fixing
+
+- Camera poses are the position of marker A (the headlights, ~5 cm ahead of the axle). Heading
+  from B → A uses a ~5 cm baseline, so it is noisy at ~1 px/cm; when moving, the filtered heading
+  from velocity is steadier.
+- At 640 px processing width the far side of the mat is ~0.9 px/cm and the near side ~1.8 px/cm,
+  so LED blobs are a few pixels. Raise `procWidth` (Data → Settings) if T4.3 shows misses far away.
+- LEDs sit above the mat, so an oblique camera shifts them slightly (parallax); the bridge hides
+  the robot for a moment.
+- Pixel grab (draw + read back) usually costs more than tracking; T4.4 reports both. If they
+  exceed ~15 ms, turn on **Track in a Web Worker**.

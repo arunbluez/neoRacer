@@ -70,6 +70,7 @@ export function MarkersView() {
         <button className={`chip ${target === 'markerB' ? 'chip-on' : ''}`} onClick={() => setTarget('markerB')}>Tap sets B</button>
         <button className={`chip ${mask ? 'chip-on' : ''}`} onClick={() => setMask(!mask)}>Mask</button>
       </div>
+      {cc.workerActive && <p className="warn-text">Tracking runs in a worker: stop tracking to sample marker colours here.</p>}
       <LiveView
         onTap={(x, y) => {
           const f = cc.lastFrame;

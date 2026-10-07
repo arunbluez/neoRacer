@@ -62,6 +62,8 @@ export class UserMediaFrameSource implements CameraSource {
   dropped = 0;
   label = 'camera';
   deviceId?: string;
+  /** When set, frames go to this callback as ImageBitmaps (for a worker) instead of pixels. */
+  bitmapSink: ((bmp: ImageBitmap, t: number) => boolean) | null = null;
 
   constructor() {
     const v = document.createElement('video');
@@ -109,17 +111,31 @@ export class UserMediaFrameSource implements CameraSource {
     }
     const vw = this.preview.videoWidth;
     const vh = this.preview.videoHeight;
-    if (vw > 0 && vh > 0 && this.cbs.size > 0) {
+    const t = meta.captureTime && meta.captureTime > 0 && meta.captureTime <= now + 1 ? meta.captureTime : now;
+    if (vw > 0 && vh > 0 && this.bitmapSink) {
+      const w = Math.min(this.procWidth, vw);
+      const h = Math.round((vh * w) / vw);
+      const sink = this.bitmapSink;
+      void createImageBitmap(this.preview, { resizeWidth: w, resizeHeight: h, resizeQuality: 'low' }).then((bmp) => {
+        if (!sink(bmp, t)) {
+          bmp.close();
+          this.dropped++;
+        }
+      }).catch(() => {
+        this.dropped++;
+      });
+    } else if (vw > 0 && vh > 0 && this.cbs.size > 0) {
       const w = Math.min(this.procWidth, vw);
       const h = Math.round((vh * w) / vw);
       if (this.canvas.width !== w || this.canvas.height !== h) {
         this.canvas.width = w;
         this.canvas.height = h;
       }
+      const g0 = performance.now();
       this.g.drawImage(this.preview, 0, 0, w, h);
       const data = this.g.getImageData(0, 0, w, h).data;
-      const t = meta.captureTime && meta.captureTime > 0 && meta.captureTime <= now + 1 ? meta.captureTime : now;
-      const frame: Frame = { width: w, height: h, data, tCaptureMs: t };
+      const grabMs = performance.now() - g0;
+      const frame: Frame = { width: w, height: h, data, tCaptureMs: t, grabMs };
       for (const cb of this.cbs) cb(frame);
     }
     this.schedule();

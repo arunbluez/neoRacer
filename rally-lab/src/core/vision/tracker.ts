@@ -20,6 +20,8 @@ export type TrackerConfig = {
   alpha?: number; beta?: number;
   predictMs: number;       // forward prediction for display (latency compensation)
   matWidthCm?: number; matHeightCm?: number; // optional: reject detections mapping outside the mat (with a small margin)
+  /** Blobs of the same marker within this distance on the mat are one marker (a pair of headlights). Default 8. */
+  mergeCm?: number;
 };
 
 export const TRACKER_DEFAULTS = { minAreaPx: 6, searchRadiusPx: 60, predictMs: 0 } as const;
@@ -146,9 +148,30 @@ export class Tracker {
       : { x0: 0, y0: 0, x1: w, y1: h };
     track.mask = thresholdMarker(frame, m, win, track.mask);
     const blobs = findBlobs(track.mask, w, h, this.cfg.minAreaPx ?? TRACKER_DEFAULTS.minAreaPx, win);
-    for (const blob of blobs) {
-      const mat = applyH(this.cfg.H, { x: blob.cx, y: blob.cy });
-      if (!accept(mat)) continue;
+    for (const [i, first] of blobs.entries()) {
+      const firstMat = applyH(this.cfg.H, { x: first.cx, y: first.cy });
+      if (!accept(firstMat)) continue;
+      // A marker can be several lights (both headlights): merge blobs close to the winner on the
+      // mat, so the position doesn't flip between them as they merge and split in the image.
+      const mergeCm = this.cfg.mergeCm ?? 8;
+      let blob = first;
+      for (const other of blobs.slice(i + 1)) {
+        const om = applyH(this.cfg.H, { x: other.cx, y: other.cy });
+        if (Math.hypot(om.x - firstMat.x, om.y - firstMat.y) > mergeCm || !accept(om)) continue;
+        const area = blob.area + other.area;
+        blob = {
+          cx: (blob.cx * blob.area + other.cx * other.area) / area,
+          cy: (blob.cy * blob.area + other.cy * other.area) / area,
+          area,
+          bbox: {
+            x0: Math.min(blob.bbox.x0, other.bbox.x0), y0: Math.min(blob.bbox.y0, other.bbox.y0),
+            x1: Math.max(blob.bbox.x1, other.bbox.x1), y1: Math.max(blob.bbox.y1, other.bbox.y1),
+          },
+          compactness: blob.compactness,
+          conf: Math.max(blob.conf, other.conf),
+        };
+      }
+      const mat = blob === first ? firstMat : applyH(this.cfg.H, { x: blob.cx, y: blob.cy });
       track.last = { x: blob.cx, y: blob.cy };
       track.misses = 0;
       return { blob, mat, candidates: blobs.length };

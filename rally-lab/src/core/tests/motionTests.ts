@@ -41,6 +41,15 @@ async function captureMotion(ctx: TestContext, cam: NonNullable<TestContext['pos
   return { t0, tCmd, tStop, poses: cam.between(tCmd, ctx.clockNow()), before };
 }
 
+/** Whether the camera saw the robot through most of a captured motion. */
+function wellTracked(cam: NonNullable<TestContext['pose']>, c: Capture, durMs: number): boolean {
+  const frames = cam.frames(c.tCmd, c.tCmd + durMs);
+  const seen = frames.filter((f) => f.detected).length;
+  return c.before.length >= 3 && frames.length > 0 && seen / frames.length >= 0.6;
+}
+
+const LOST_NOTE = 'Camera lost the robot during the run: measure it by hand.';
+
 async function manual(ctx: TestContext, title: string, text: string, fields: PromptField[]): Promise<Record<string, number>> {
   const r = await ctx.ask({ title, text, fields, buttons: ['Save'] });
   const out: Record<string, number> = {};
@@ -189,7 +198,7 @@ async function straightRun(ctx: TestContext, speed: number, durMs: number): Prom
     });
     const start = restPose(c.before);
     const endP = restPose(c.poses.slice(-5));
-    if (!start || !endP) throw new Error('Lost the robot in the camera view.');
+    if (!start || !endP || !wellTracked(cam, c, durMs)) return measureStraightByHand(ctx, speed, durMs, LOST_NOTE);
     const { along, side } = alongAndSide(start, start.heading, endP);
     const pts = c.poses.map((q) => ({ t: q.tFrame - c.tCmd, x: q.fx, y: q.fy }));
     const steady = steadySpeed(pts, Math.min(500, durMs / 2), durMs);
@@ -202,7 +211,11 @@ async function straightRun(ctx: TestContext, speed: number, durMs: number): Prom
   await ctx.link.send(`F,${speed}`);
   await ctx.sleep(durMs);
   await ctx.link.stop();
-  const m = await manual(ctx, `F,${speed}: measure`, 'Measure from the start mark to the front of the robot.', [
+  return measureStraightByHand(ctx, speed, durMs);
+}
+
+async function measureStraightByHand(ctx: TestContext, speed: number, durMs: number, why?: string): Promise<StraightRun> {
+  const m = await manual(ctx, `F,${speed}: measure`, `${why ? `${why} ` : ''}Measure from the start mark to the front of the robot.`, [
     { key: 'along', label: 'Distance along the line', type: 'number', unit: 'cm', hint: 'straight-line distance in the start direction' },
     { key: 'side', label: 'Sideways drift', type: 'number', unit: 'cm', default: 0, hint: '+ right, − left (seen from behind the robot)' },
   ]);
@@ -350,6 +363,7 @@ export const T3_3: TestDefinition = {
         tS = rec.tSent ?? ctx.clockNow();
         return tS;
       }, 1200);
+      if (!wellTracked(cam, c, durMs)) throw new Error('Camera lost the robot during the run: check the markers, or turn tracking off to measure by hand.');
       const pts = c.poses.map((q) => ({ t: q.tFrame - c.tCmd, x: q.fx, y: q.fy }));
       const prof = speeds(pts);
       const steady = steadySpeed(pts, durMs * 0.5, durMs);
@@ -441,7 +455,11 @@ export const T3_4: TestDefinition = {
         });
         const hs = [...c.before, ...c.poses].map((q) => q.headingDeg).filter((h): h is number => h !== null);
         const un = unwrapDeg(hs);
-        deg = un.length > 2 ? Math.abs(un[un.length - 1] - un[0]) : null;
+        deg = un.length > 2 && wellTracked(cam, c, durMs) ? Math.abs(un[un.length - 1] - un[0]) : null;
+        if (deg === null) {
+          const m = await manual(ctx, `${side},${speed}: angle`, `${LOST_NOTE} Total angle turned, including full turns.`, [{ key: 'deg', label: 'Angle', type: 'number', unit: '°' }]);
+          deg = Number.isFinite(m.deg) ? Math.abs(m.deg) : null;
+        }
       } else {
         await ctx.link.send(`${side},${speed}`);
         await ctx.sleep(durMs);
@@ -514,8 +532,17 @@ export const T3_5: TestDefinition = {
         const pts = c.poses.map((q) => ({ t: q.tFrame - c.tCmd, x: q.fx, y: q.fy }));
         const steadyPts = pts.filter((q) => q.t > durMs * 0.3 && q.t <= durMs);
         const fit = circleFit(steadyPts);
-        radius = fit ? fit.r : null;
-        speed = steadySpeed(pts, durMs * 0.3, durMs);
+        if (wellTracked(cam, c, durMs)) {
+          radius = fit ? fit.r : null;
+          speed = steadySpeed(pts, durMs * 0.3, durMs);
+        } else {
+          const m = await manual(ctx, `MS,${l},${r}: measure`, `${LOST_NOTE} Chord from start to end, and the heading change.`, [
+            { key: 'chord', label: 'Chord', type: 'number', unit: 'cm' },
+            { key: 'deg', label: 'Heading change', type: 'number', unit: '°' },
+          ]);
+          radius = radiusFromChord(m.chord, m.deg);
+          speed = radius === null ? null : (radius * (Math.abs(m.deg) * Math.PI / 180)) / (durMs / 1000);
+        }
       } else {
         await ctx.link.send(`MS,${l},${r}`);
         await ctx.sleep(durMs);

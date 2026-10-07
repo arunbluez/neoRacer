@@ -172,7 +172,7 @@ export const T4_3: TestDefinition = {
 
 // ---------------------------------------------------------------- T4.4
 
-type T44Data = { durS: number; frames: number; procs: number[]; gaps: number[]; detected: number };
+type T44Data = { durS: number; frames: number; procs: number[]; grabs?: number[]; gaps: number[]; detected: number };
 
 export const T4_4: TestDefinition = {
   id: 'T4.4',
@@ -192,7 +192,8 @@ export const T4_4: TestDefinition = {
     }
     const fr = pose.frames(t0, ctx.clockNow());
     const gaps = fr.slice(1).map((f, i) => f.tFrame - fr[i].tFrame);
-    const data: T44Data = { durS: durMs / 1000, frames: fr.length, procs: fr.map((f) => r1(f.procMs)), gaps: gaps.map(r1), detected: fr.filter((f) => f.detected).length };
+    const grabs = fr.map((f) => f.grabMs).filter((x): x is number => x !== undefined).map(r1);
+    const data: T44Data = { durS: durMs / 1000, frames: fr.length, procs: fr.map((f) => r1(f.procMs)), grabs, gaps: gaps.map(r1), detected: fr.filter((f) => f.detected).length };
     ctx.sample({ frames: data.frames });
     return data;
   },
@@ -204,11 +205,14 @@ export const T4_4: TestDefinition = {
       values: {
         fps: num(d.frames / d.durS), procMedMs: num(median(d.procs)), procP95Ms: num(quantile(d.procs, 0.95)), procMaxMs: num(max(d.procs)),
         gapMedMs: num(medGap), gapMaxMs: num(max(d.gaps)), longGaps: long.length, detectPct: num((100 * d.detected) / Math.max(1, d.frames)),
+        grabMedMs: d.grabs?.length ? num(median(d.grabs)) : null, grabP95Ms: d.grabs?.length ? num(quantile(d.grabs, 0.95)) : null,
       },
       tables: [{ title: 'Frame intervals (ms)', columns: ['min', 'median', 'p95', 'max', '> 1.5× median'], rows: [[num(min(d.gaps)), num(medGap), num(quantile(d.gaps, 0.95)), num(max(d.gaps)), long.length]] }],
       notes: [
-        `${num(d.frames / d.durS)} fps, processing ${num(median(d.procs))} ms median (target ≤ 20 ms, ≥ 20 fps).`,
-        quantile(d.procs, 0.95) > 15 ? 'Processing p95 above 15 ms: consider tracking in a Web Worker.' : 'Processing fits comfortably in the frame budget.',
+        `${num(d.frames / d.durS)} fps, tracking ${num(median(d.procs))} ms median${d.grabs?.length ? ` + ${num(median(d.grabs))} ms to grab the pixels` : ''} (target ≤ 20 ms, ≥ 20 fps).`,
+        quantile(d.procs, 0.95) + (d.grabs?.length ? quantile(d.grabs, 0.95) : 0) > 15
+          ? 'Grab + tracking p95 above 15 ms: turn on "Track in a Web Worker" in Data → Settings.'
+          : 'Grab + tracking fit comfortably in the frame budget.',
       ],
     };
   },

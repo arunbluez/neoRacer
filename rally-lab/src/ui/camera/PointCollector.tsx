@@ -12,7 +12,7 @@ export function PointCollector() {
   const [xy, setXy] = useState({ x: '', y: '' });
   if (!req) return null;
   const cal = cc.calibration;
-  const f = cc.lastFrame;
+  const f = cc.frameSize;
   // live-view taps are in processed-frame pixels; the calibration is in full-size pixels
   const k = cal && f ? cal.imageWidth / f.width : 1;
   const landmarks = cal?.landmarks ?? [];

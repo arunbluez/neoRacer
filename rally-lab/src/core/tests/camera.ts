@@ -15,7 +15,7 @@ export type TrackedPose = {
   speedCmS: number;
 };
 
-export type FrameStat = { tFrame: number; procMs: number; detected: boolean; candidates: number };
+export type FrameStat = { tFrame: number; procMs: number; grabMs?: number; detected: boolean; candidates: number };
 
 export interface PoseSource {
   /** True when calibrated and tracking frames. */

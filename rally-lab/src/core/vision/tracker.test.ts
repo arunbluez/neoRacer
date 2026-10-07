@@ -151,3 +151,30 @@ describe('Tracker', () => {
     expect(lost).toBeLessThan(40);
   });
 });
+
+describe('tracker: paired lights', () => {
+  it('merges two headlights into one marker at their midpoint', async () => {
+    const { Tracker } = await import('./tracker');
+    const { fillDisc } = await import('./rectify');
+    const w = 320;
+    const h = 180;
+    const mk = (lx: number, rx: number, rLeft: number) => {
+      const data = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < w * h; i++) data[i * 4 + 3] = 255;
+      const img = { width: w, height: h, data };
+      fillDisc(img, lx, 90, rLeft, [0, 255, 0]);
+      fillDisc(img, rx, 90, 2, [0, 255, 0]);
+      return { ...img, tCaptureMs: 0 };
+    };
+    // 1 px = 1 cm
+    const t = new Tracker({ H: [1, 0, 0, 0, 1, 0, 0, 0, 1], markerA: { h: 120, s: 1, v: 1, hTol: 15, sMin: 0.5, vMin: 0.5 }, minAreaPx: 4, searchRadiusPx: 60, predictMs: 0 });
+    // the left light alternates between slightly larger and slightly smaller than the right one
+    const xs: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = t.process({ ...mk(100, 105, i % 2 ? 2.4 : 1.8), tCaptureMs: i * 33 });
+      xs.push(r.raw!.xCm);
+    }
+    for (const x of xs) expect(Math.abs(x - 103)).toBeLessThan(1.5);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(1.5);
+  });
+});

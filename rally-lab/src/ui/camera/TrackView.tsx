@@ -82,8 +82,8 @@ export function TrackView() {
   const lr = pipe?.lastResult;
   const fresh = last && performance.now() - last.tFrame < 500;
 
-  const outline = cal && cc.lastFrame
-    ? matOutline(cal, 12).map((p) => ({ x: (p.x * cc.lastFrame!.width) / cal.imageWidth, y: (p.y * cc.lastFrame!.width) / cal.imageWidth }))
+  const outline = cal && cc.frameSize
+    ? matOutline(cal, 12).map((p) => ({ x: (p.x * cc.frameSize!.width) / cal.imageWidth, y: (p.y * cc.frameSize!.width) / cal.imageWidth }))
     : null;
 
   return (
