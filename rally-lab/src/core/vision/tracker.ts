@@ -73,8 +73,15 @@ export class Tracker {
     this.filter.reset();
   }
 
-  process(frame: { width: number; height: number; data: Uint8ClampedArray; tCaptureMs: number }): TrackResult {
+  /**
+   * Track one frame. opts.H: this frame's own homography (a hand-held camera
+   * moves; the filter carries on). opts.hintA: where marker A is expected in
+   * this frame (e.g. the robot's estimated position projected into it), used
+   * instead of its last image position while it is being tracked.
+   */
+  process(frame: { width: number; height: number; data: Uint8ClampedArray; tCaptureMs: number }, opts: { H?: Mat3; hintA?: Pt } = {}): TrackResult {
     const { width: w, height: h, tCaptureMs: t } = frame;
+    if (opts.H) this.cfg.H = opts.H;
     if (w !== this.w || h !== this.h) {
       this.w = w;
       this.h = h;
@@ -92,7 +99,7 @@ export class Tracker {
         p.x <= cfg.matWidthCm + MAT_MARGIN_CM && p.y <= cfg.matHeightCm + MAT_MARGIN_CM;
     };
 
-    const fa = this.search(frame, this.ta, cfg.markerA, this.ta.misses < LOST_AFTER ? this.ta.last : null, inMat);
+    const fa = this.search(frame, this.ta, cfg.markerA, this.ta.misses < LOST_AFTER ? (opts.hintA ?? this.ta.last) : null, inMat);
     res.candidates = fa.candidates;
 
     let fb: Found = { candidates: 0 };

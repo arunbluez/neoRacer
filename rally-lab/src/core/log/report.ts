@@ -5,8 +5,17 @@
 import type { RobotProfile } from '../model/profile';
 import type { Settings } from '../settings';
 import type { ResultTable, TestDefinition, TestRun } from '../tests/types';
+import type { AutoSummary } from '../race/autoRun';
 import type { TrackCalibration } from '../vision/calibration';
 import type { SessionHeader } from './session';
+
+/** One auto run as the report needs it: its auto.start and auto.end events. */
+export type AutoRunReport = {
+  t: number;
+  start: { route?: string; style?: string; lengthCm?: number; settings?: Record<string, unknown>; start?: { from?: string; distCm?: number }; model?: Record<string, unknown> };
+  end?: AutoSummary & { t: number };
+  cam?: { frames: number; matPct: number; robotPct: number; fps: number };
+};
 
 export type ReportInput = {
   header: SessionHeader;
@@ -16,6 +25,7 @@ export type ReportInput = {
   calibrations: TrackCalibration[];
   settings: Settings;
   eventCounts?: Record<string, number>;
+  autoRuns?: AutoRunReport[];
 };
 
 const cell = (v: unknown): string => {
@@ -71,6 +81,40 @@ export function openWarnings(input: Pick<ReportInput, 'runs' | 'profile' | 'cali
   return w;
 }
 
+function autoSection(runs: AutoRunReport[]): string[] {
+  const out: string[] = ['', '## Auto runs (camera assisted)', ''];
+  out.push('Errors are the follower\'s sideways distance from the planned path (cm), by its camera-corrected estimate. Per-tick data: auto.tick; camera fixes: auto.fix (dx, dy = camera − estimate); spins: auto.spin.');
+  runs.forEach((r, i) => {
+    const e = r.end;
+    const st = r.start.settings ?? {};
+    out.push('');
+    out.push(`### Auto run ${i + 1} — ${e ? e.reason : 'no end recorded'}`);
+    out.push('');
+    out.push(`- At t = ${Math.round(r.t)} ms; route ${r.start.route ?? '?'}, ${r.start.style ?? '?'} turns, ${cell(st.speedCmS)} cm/s, camera ${st.cameraAssist ? 'on' : 'off'}, line guard ${st.lineGuard ? 'on' : 'off'}`);
+    if (r.start.start) out.push(`- Start pose from ${r.start.start.from}${r.start.start.from === 'camera' ? `, ${cell(r.start.start.distCm)} cm from the start line` : ''}`);
+    if (r.start.model) out.push(`- Motor model: \`${JSON.stringify(r.start.model)}\``);
+    if (e) {
+      out.push(`- ${e.finished ? 'Finished' : 'Stopped'} after ${(e.timeMs / 1000).toFixed(1)} s at ${e.progressCm} of ${e.lengthCm} cm`);
+      out.push(`- Camera fixes: ${e.fixes.used} used of ${e.fixes.total} (${e.fixes.rejected} rejected, ${e.fixes.resets} resets); line-sensor events: ${e.lineEvents}`);
+      out.push(`- Learned: turning bias ${e.learned.biasDegS} °/s, speed scale ${e.learned.speedScale}, turn scale ${e.learned.turnScale}`);
+      if (r.cam) out.push(`- Camera: ${r.cam.frames} frames, ${r.cam.fps} fps, mat found ${r.cam.matPct} %, robot found ${r.cam.robotPct} %`);
+      out.push('');
+      out.push(mdTable({
+        title: 'Per section', columns: ['section', 'time s', 'max err cm', 'mean err cm', 'camera fixes'],
+        rows: e.sections.map((x) => [x.id, (x.timeMs / 1000).toFixed(1), x.maxErrCm, x.meanErrCm, x.fixes]),
+      }));
+      if (e.spins.length) {
+        out.push('');
+        out.push(mdTable({
+          title: 'Spins (heading error 12 cm after, + = right)', columns: ['section', 'turn °', 'ms', 'heading err after °'],
+          rows: e.spins.map((x) => [x.section, x.deltaDeg, x.durMs, x.headingErrAfterDeg ?? null]),
+        }, 60));
+      }
+    }
+  });
+  return out;
+}
+
 export function buildReport(input: ReportInput): string {
   const { header, runs, defs, profile, calibrations } = input;
   const out: string[] = [];
@@ -119,6 +163,8 @@ export function buildReport(input: ReportInput): string {
       out.push(mdTable(agg));
     }
   }
+
+  if (input.autoRuns?.length) out.push(...autoSection(input.autoRuns));
 
   out.push('');
   out.push('## Robot profile');

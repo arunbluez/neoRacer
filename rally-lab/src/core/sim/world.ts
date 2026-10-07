@@ -23,6 +23,12 @@ export type SimParams = {
   /** Ultrasonic reading when nothing is scripted, cm. */
   distanceCm: number;
   noise: number;
+  /**
+   * Optional straight-line motor: above the deadband v = a·cmd + b (cm/s),
+   * like the real robot (which jumps to ~20 cm/s at its deadband). Without
+   * it, speed follows maxSpeedCmS·((cmd − deadband)/(100 − deadband))^0.9.
+   */
+  linear?: { a: number; b: number };
 };
 
 export const DEFAULT_SIM_PARAMS: SimParams = {
@@ -108,6 +114,8 @@ export class SimWorld {
   private target(cmd: number): number {
     const a = Math.abs(cmd);
     if (a < this.params.deadband) return 0;
+    const lin = this.params.linear;
+    if (lin) return Math.sign(cmd) * Math.max(0, lin.a * a + lin.b);
     return Math.sign(cmd) * this.params.maxSpeedCmS * ((a - this.params.deadband) / (100 - this.params.deadband)) ** 0.9;
   }
 

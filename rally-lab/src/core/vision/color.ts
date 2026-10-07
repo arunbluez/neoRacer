@@ -242,3 +242,13 @@ export function matchesMarker(r: number, g: number, b: number, m: MarkerColor): 
   if (max - min < m.sMin * max) return false;
   return hueDist(hueOf(r, g, b, max, min), m.h) <= m.hTol;
 }
+
+/**
+ * A marker colour for an LED set to `rgb`, before anyone has sampled it from
+ * the camera: its hue, with tolerances wide enough for a saturated LED's
+ * coloured halo.
+ */
+export function defaultMarkerColor(rgb: { r: number; g: number; b: number }): MarkerColor {
+  const c = rgbToHsv(rgb.r, rgb.g, rgb.b);
+  return { h: c.h, s: Math.max(0.5, c.s), v: Math.max(0.6, c.v), hTol: 28, sMin: 0.3, vMin: 0.45 };
+}

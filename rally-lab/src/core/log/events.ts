@@ -21,12 +21,15 @@ export type LogKind =
   | 'cam.stats' // fps, procMs, dropped (once per second)
   | 'cam.pose' // xCm, yCm, headingDeg, conf, tFrame, raw
   | 'test.start' | 'test.sample' | 'test.end' // testId, runId, params, data, summary
+  | 'auto.start' | 'auto.tick' | 'auto.fix' | 'auto.line' | 'auto.spin' | 'auto.end' // camera-assisted auto run (race/autoRun)
+  | 'auto.cam' // hand-held camera: mat found, orientation, fps (once per second)
   | 'note' // text, tags
   | 'app'; // event, detail
 
 export const LOG_KINDS: LogKind[] = [
   'ble.tx', 'ble.drop', 'ble.rx', 'ble.state', 'ble.err', 'sensor', 'link.stats', 'input',
-  'cam.stats', 'cam.pose', 'test.start', 'test.sample', 'test.end', 'note', 'app',
+  'cam.stats', 'cam.pose', 'test.start', 'test.sample', 'test.end',
+  'auto.start', 'auto.tick', 'auto.fix', 'auto.line', 'auto.spin', 'auto.end', 'auto.cam', 'note', 'app',
 ];
 
 /** Round a time to 0.1 ms for compact logs. */

@@ -1,4 +1,5 @@
 import type { BlockingTable } from './link/blocking';
+import { DEFAULT_AUTO_SETTINGS, type AutoSettings } from './race/autoRun';
 import type { Rgb } from './protocol/commands';
 
 export type PollerEntry = { cmd: string; hz: number };
@@ -47,6 +48,10 @@ export type Settings = {
     tiltMaxDeg: number;
     lineOverlay: boolean;
   };
+  /** Camera-assisted auto run. */
+  auto: AutoSettings;
+  /** Show the lab tools (Monitor, Console, Tests, Camera) in the tab bar. */
+  labTools: boolean;
 };
 
 export const DEFAULT_POLLER_PRESETS: PollerPreset[] = [
@@ -66,8 +71,9 @@ export const DEFAULT_SETTINGS: Settings = {
   packWrites: false,
   blockingOverrides: {},
   pollerPresets: DEFAULT_POLLER_PRESETS,
-  matWidthCm: 300,
-  matHeightCm: 250,
+  // The Robot Rallye mat, seen from the near end (side b).
+  matWidthCm: 200,
+  matHeightCm: 300,
   // 4:3 uses the whole sensor; 16:9 crops it (and in portrait, to a narrow strip).
   cameraWidth: 1280,
   cameraHeight: 960,
@@ -83,6 +89,8 @@ export const DEFAULT_SETTINGS: Settings = {
   mockRobot: false,
   // sendHz 0: send at the write gap (minWriteGapMs)
   drive: { speedCap: 50, expo: 0.3, turnGain: 0.5, deadzone: 0.06, useDeadband: true, sendHz: 0, tiltMaxDeg: 30, lineOverlay: true },
+  auto: DEFAULT_AUTO_SETTINGS,
+  labTools: false,
 };
 
 /** Fill in fields missing from older stored settings. */
@@ -91,6 +99,7 @@ export function withDefaults(s: Partial<Settings> | undefined): Settings {
     ...DEFAULT_SETTINGS,
     ...(s ?? {}),
     drive: { ...DEFAULT_SETTINGS.drive, ...(s?.drive ?? {}) },
+    auto: { ...DEFAULT_SETTINGS.auto, ...(s?.auto ?? {}) },
     markerA: { ...DEFAULT_SETTINGS.markerA, ...(s?.markerA ?? {}) },
     markerB: { ...DEFAULT_SETTINGS.markerB, ...(s?.markerB ?? {}) },
     pollerPresets: s?.pollerPresets?.length ? s.pollerPresets : DEFAULT_POLLER_PRESETS,

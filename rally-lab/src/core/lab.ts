@@ -3,8 +3,10 @@
 // Platform adapters are passed in; the UI only talks to this object.
 
 import { RobotLink } from './link/link';
+import { AutoRun, type AutoSettings } from './race/autoRun';
 import { zipSession, zipSessions, type SessionBundle } from './log/export';
-import { buildReport } from './log/report';
+import { buildReport, type AutoRunReport } from './log/report';
+import type { LogEvent } from './log/events';
 import { ALL_TESTS } from './tests/registry';
 import { Poller } from './link/poller';
 import { Logger } from './log/logger';
@@ -58,6 +60,8 @@ export class Lab {
   camera?: CameraControl;
   /** The active track calibration (loaded by the camera layer). */
   calibration?: TrackCalibration;
+  /** The current (or last) camera-assisted auto run. */
+  auto?: AutoRun;
   private listeners = new Set<Listener>();
   private real?: Transport;
   private mock?: Transport;
@@ -170,6 +174,7 @@ export class Lab {
   }
 
   async disconnect(): Promise<void> {
+    this.auto?.stop('disconnect');
     this.runner.abort('disconnect');
     this.poller.stop();
     await this.link.disconnect();
@@ -214,9 +219,19 @@ export class Lab {
     this.emit();
   }
 
-  /** STOP: stop the motors, abort any test. */
+  /** A new auto run with these settings (not started yet). */
+  createAuto(settings: AutoSettings): AutoRun {
+    if (this.auto?.state === 'running') throw new Error('An auto run is already going.');
+    if (this.runner.running) throw new Error('A test is running.');
+    this.auto = new AutoRun({ link: this.link, poller: this.poller, logger: this.logger, clock: this.deps.clock, profile: this.profile }, settings);
+    this.emit();
+    return this.auto;
+  }
+
+  /** STOP: stop the motors, abort any test or auto run. */
   stopAll(reason = 'STOP'): void {
     void this.link.stop();
+    this.auto?.stop(reason);
     if (this.runner.running) this.runner.abort(reason);
     this.logger.log('app', { event: 'stop', detail: reason });
   }
@@ -224,6 +239,7 @@ export class Lab {
   /** The page became hidden: stop motors, tests and pollers. */
   onHidden(): void {
     if (this.link.connected) void this.link.stop();
+    this.auto?.stop('page hidden');
     // A test that is only waiting for a typed measurement can carry on when the page is back.
     if (!this.runner.waitingForUser) this.runner.abort('page hidden');
     this.poller.stop();
@@ -233,7 +249,7 @@ export class Lab {
 
   onVisible(): void {
     this.logger.log('app', { event: 'visibility', detail: 'visible' });
-    if (this.link.connected && this.poller.entries.length === 0 && !this.runner.running) this.poller.set([{ cmd: 'PING', hz: 2 }], 'default');
+    if (this.link.connected && this.poller.entries.length === 0 && !this.runner.running && this.auto?.state !== 'running') this.poller.set([{ cmd: 'PING', hz: 2 }], 'default');
   }
 
   async setSettings(patch: Partial<Settings>): Promise<void> {
@@ -301,7 +317,7 @@ export class Lab {
     const eventCounts: Record<string, number> = {};
     for (const e of events) eventCounts[e.k] = (eventCounts[e.k] ?? 0) + 1;
     const report = buildReport({
-      header, runs, defs: ALL_TESTS, profile, calibrations, settings: header.settings ?? this.settings, eventCounts,
+      header, runs, defs: ALL_TESTS, profile, calibrations, settings: header.settings ?? this.settings, eventCounts, autoRuns: autoRunsOf(events),
     });
     return { header, events, runs, profile, calibrations, images, report };
   }
@@ -318,4 +334,28 @@ export class Lab {
     const d = this.deps.wallClock().toISOString().slice(0, 10);
     return { name: `rally-lab-all-${d}.zip`, bytes: zipSessions(bundles) };
   }
+}
+
+/** Pair each auto.start with its auto.end, and summarise the camera events in between. */
+export function autoRunsOf(events: LogEvent[]): AutoRunReport[] {
+  const out: AutoRunReport[] = [];
+  let cur: AutoRunReport | null = null;
+  let camN = 0, camMat = 0, camRobot = 0, camFps = 0;
+  for (const e of events) {
+    if (e.k === 'auto.start') {
+      cur = { t: e.t, start: e as unknown as AutoRunReport['start'] };
+      out.push(cur);
+      camN = camMat = camRobot = camFps = 0;
+    } else if (cur && e.k === 'auto.cam') {
+      camN++;
+      camMat += Number(e.matPct ?? 0);
+      camRobot += Number(e.robotPct ?? 0);
+      camFps += Number(e.fps ?? 0);
+      cur.cam = { frames: Math.round(camFps), fps: Math.round((camFps / camN) * 10) / 10, matPct: Math.round(camMat / camN), robotPct: Math.round(camRobot / camN) };
+    } else if (cur && e.k === 'auto.end') {
+      cur.end = e as unknown as AutoRunReport['end'];
+      cur = null;
+    }
+  }
+  return out;
 }

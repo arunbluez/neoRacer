@@ -8,6 +8,7 @@ import { DevSync } from '../adapters/storage/devSync';
 import { loadLastRobotId, loadSettings, saveLastRobotId, saveSettings } from '../adapters/storage/localSettings';
 import { Lab } from '../core/lab';
 import { makeSyntheticTrack, type TrackMask } from '../core/sim/track';
+import { PUGUZ_SIM } from '../core/sim/robots';
 import { SimWorld } from '../core/sim/world';
 import type { PromptHandle, PromptRequest, PromptResponse, TestUi } from '../core/tests/types';
 import type { Clock } from '../core/types';
@@ -83,7 +84,8 @@ export async function initLab(): Promise<Lab> {
     realTransport: () => real,
     mockTransport: () => {
       const track = getSimTrack();
-      const world = new SimWorld(clock.now(), { mask: mockMask.provide?.() ?? track.mask, pose: track.start });
+      // The mock behaves like the robot measured at the venue (puguz).
+      const world = new SimWorld(clock.now(), { mask: mockMask.provide?.() ?? track.mask, pose: track.start, params: PUGUZ_SIM });
       world.shade = track.bridge;
       return new MockTransport(clock, {}, world);
     },

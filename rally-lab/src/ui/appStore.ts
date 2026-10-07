@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 import type { PromptRequest, PromptResponse } from '../core/tests/types';
 
-export type Tab = 'connect' | 'monitor' | 'console' | 'drive' | 'tests' | 'camera' | 'data';
+export type Tab = 'connect' | 'monitor' | 'console' | 'drive' | 'auto' | 'tests' | 'camera' | 'data';
 
 export type OpenPrompt = {
   id: number;

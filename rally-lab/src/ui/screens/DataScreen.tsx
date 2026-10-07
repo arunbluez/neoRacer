@@ -253,6 +253,10 @@ function SettingsPanel() {
       <h3>Settings</h3>
       <div className="card">
         <label className="row" style={{ marginBottom: 12 }}>
+          <input type="checkbox" checked={s.labTools} onChange={(e) => set({ labTools: e.target.checked })} />
+          <span><b>Lab tools</b> — show Monitor, Console, Tests and Camera (calibrated tripod tracking) in the tab bar</span>
+        </label>
+        <label className="row" style={{ marginBottom: 12 }}>
           <input type="checkbox" checked={s.mockRobot} onChange={(e) => set({ mockRobot: e.target.checked })} />
           <span><b>Mock robot</b> — simulated Cutebot instead of Bluetooth</span>
         </label>
@@ -295,7 +299,7 @@ function SettingsPanel() {
           <NumberSetting label="Tilt range" unit="°" value={s.drive.tiltMaxDeg} onChange={(v) => set({ drive: { ...s.drive, tiltMaxDeg: v } })} />
         </div>
       </div>
-      <button className="btn btn-block" onClick={() => void lab.setSettings({ ...DEFAULT_SETTINGS, mockRobot: s.mockRobot })}>Reset settings to defaults</button>
+      <button className="btn btn-block" onClick={() => void lab.setSettings({ ...DEFAULT_SETTINGS, mockRobot: s.mockRobot, labTools: s.labTools, auto: { ...DEFAULT_SETTINGS.auto, route: s.auto.route } })}>Reset settings to defaults</button>
     </div>
   );
 }

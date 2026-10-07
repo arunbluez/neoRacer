@@ -4,7 +4,46 @@ A measurement PWA for the Cutebot (micro:bit V2) over Web Bluetooth, for Chrome 
 It connects to a robot, runs repeatable experiments, tracks the robot with the phone camera,
 and logs every packet and measurement so the race app can be built from measured facts.
 
-It is a lab instrument, not the race app.
+It started as a lab instrument; it now also drives the track by itself: **Auto** runs the
+measured route with the phone camera, held by hand, correcting the robot as it goes.
+
+The tab bar shows **Connect, Drive, Auto, Data**. The lab tools (Monitor, Console, Tests and
+the tripod Camera) are behind Data → Settings → **Lab tools**.
+
+## Auto run (camera assisted)
+
+The robot drives a hard-coded route (the [track code](../docs/track.md)). The phone camera finds
+the mat in every frame, so the phone can be held by hand; it finds the robot's lights, and the
+app corrects the robot when it drifts from the route. The line sensors are a last guard: both
+black (off the lane) stops the run.
+
+1. Connect the robot. Stand behind one end of the mat (side b, the near straight, is the default
+   view) and hold the phone **in landscape**, high enough that the **whole mat** is in the picture.
+2. Auto → **Start camera**. The badges show `mat ✓` (and which side you are looking from) and
+   `robot ✓`. Tap **Lights on** if the robot isn't seen: the headlights go green and the
+   underglow cyan.
+3. Check the coloured route line lies on the lane. If it is turned, tap **Turn mat**.
+4. Place the robot on the start line, facing section a (towards side b).
+5. Pick the speed (start at the slowest, 22 cm/s, with **Spin on the spot** turns), tap
+   **Full screen**, then **Start**. STOP (or the header's STOP, or leaving the app) stops it.
+6. After the run: the summary shows the time and how far off the route each section was. Export
+   the logs (**Export logs**) and send them over: the route and the tuning get corrected from them.
+
+What the app does each frame: finds the mat's four corners (a dark quadrilateral on the lighter
+floor, edges refined to sub-pixel), works out which way round it is from the lane pattern, works
+out where the phone is from the mat's perspective, finds the green headlights and corrects their
+position for their height above the mat (seen from 1.1 m, a light 3 cm up appears up to 11 cm too
+far away at the far end). An estimator (Kalman filter) combines the camera fixes, which arrive
+~100 ms late, with what the wheel commands should do, and learns how the robot pulls to one side,
+how fast it really goes and how far it really turns. The follower steers by curvature towards the
+route, keeping every moving wheel above its deadband.
+
+Logged for every run: `auto.start` (route, settings, motor model, plan), `auto.tick` (25 per
+second: estimated pose, section, error, wheel commands, learned bias), `auto.fix` (every camera
+fix and whether it was used), `auto.cam` (once per second: fps, mat and robot found, mat corners,
+phone position), `auto.line`, `auto.spin` and `auto.end` (summary). `report.md` gets an "Auto
+runs" section, and each run saves the camera frame and a 1 cm/px top-down picture of the mat at
+its start and end into the session's images.
 
 ## Run it
 
@@ -48,10 +87,11 @@ deployed, the header shows **Reload new version**.
 Data → Settings → **Mock robot**. The mock emulates `microbitapi.js`: same parsing, one handler at
 a time with the firmware's blocking times, a 20-byte receive buffer that drops bytes, a queue of
 at most 10 pending commands, link latency, jitter and loss, and a 2D world with differential
-drive (deadband 12, right wheel 3 % slow, 9.2 cm track width) and line sensors on a copy of the
-real mat. On the Camera tab, **Simulated camera** shows the mock robot from the viewpoint of a
-photo of the real track, so calibration, markers, tracking and every T4 test run end to end.
-The header shows **MOCK** in orange.
+drive behaving like the robot measured at the venue (deadband 18, ~20 cm/s at the deadband, right
+wheel 10 % fast, 8.5 cm track width) and line sensors on a copy of the real mat. The **simulated
+camera** is a hand-held phone behind the near end of the mat (it sways a little), with the robot's
+lights drawn at their real heights, so Auto runs end to end in the browser; the tripod Camera tab
+and the T4 tests use it too. The header shows **MOCK** in orange.
 
 ## A day at the track
 
@@ -86,14 +126,12 @@ Bluetooth link on a real robot, and blocking commands freeze motor updates (see
 
 ## What the real mat looks like to the camera
 
-From a photo of the track (rectified to 300 × 250 cm): lane ~18 cm wide with ~2 cm white borders;
-left straight at x ≈ 18, top straight y ≈ 59, bottom straight y ≈ 187, right side x ≈ 276;
-serpentine legs at x ≈ 165, 195, 222, 248; checkered start/finish at x ≈ 62–72 on the top
-straight; bridge on the bottom-left corner; red cones at the hairpins and inside the bottom
-straight. Under hall lighting the black background reads V ≈ 0.25–0.42, the lane runs blue
+The layout, sections and measurements are in [docs/track.md](../docs/track.md) (mat 200 × 300 cm,
+seen from side b). Under hall lighting the black background reads V ≈ 0.25–0.42, the lane runs blue
 (223°) → pastel purple (295°, S ≈ 0.28) → pink (335°), and **hues 80–210° never occur on the mat**:
-green and cyan make the best markers (the defaults). A 1 cm/px picture of the mat is a test
-fixture (`src/core/vision/fixtures/`) that keeps the class thresholds honest.
+green and cyan make the best markers (the defaults). 1 cm/px pictures of the mat are test
+fixtures (`src/core/vision/fixtures/`): they keep the class thresholds honest and check that the
+route runs on the lane.
 
 ## Commands
 

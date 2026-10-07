@@ -36,6 +36,8 @@ class CameraController implements CameraControl {
   error?: string;
   pointRequest?: PointRequest;
   private frameTimes: number[] = [];
+  /** Other users of every frame (the auto run's hand-held tracking). */
+  private frameListeners = new Set<(f: Frame) => void>();
   private worker: Worker | null = null;
   private workerBusy = false;
   private workerCfg = '';
@@ -118,7 +120,7 @@ class CameraController implements CameraControl {
     if (deviceId === 'sim') {
       const t = getSimTrack();
       src = new SimFrameSource(clock, () => (lab.mockTransport instanceof MockTransport ? lab.mockTransport.world : undefined), {
-        image: t.image, matWidthCm: t.matWidthCm, matHeightCm: t.matHeightCm,
+        image: t.image, matWidthCm: t.matWidthCm, matHeightCm: t.matHeightCm, occluders: [t.bridge],
       });
     } else src = new UserMediaFrameSource();
     try {
@@ -138,6 +140,7 @@ class CameraController implements CameraControl {
       this.frameTimes.push(f.tCaptureMs);
       pipe.dropped = src.dropped;
       pipe.process(f);
+      for (const cb of this.frameListeners) cb(f);
     });
     lab.camera = this;
     lab.logger.log('app', { event: 'camera', detail: { started: src.label, deviceId: src.deviceId, settings: src.settings() } });
@@ -164,6 +167,12 @@ class CameraController implements CameraControl {
     const lab = getLab();
     if (lab.camera === this) lab.camera = undefined;
     this.bump();
+  }
+
+  /** Receive every frame (processed size) while the camera runs. */
+  addFrameListener(cb: (f: Frame) => void): () => void {
+    this.frameListeners.add(cb);
+    return () => this.frameListeners.delete(cb);
   }
 
   async lockExposure(): Promise<LockResult | undefined> {

@@ -111,3 +111,30 @@
   tracking pauses when the picture shape no longer matches the calibration, white-balance and
   focus lock retry with in-range values, hints when Chrome hides the ultra-wide camera.
 - docs/field-notes-2026-10-07.md: what the logs measured.
+
+## Auto run with a hand-held camera (2026-10-07)
+
+- **Auto** tab: drives the measured route with the phone camera held by hand. Mat finder
+  (`vision/matFinder.ts`: dark region with holes filled, robust edge lines, sub-pixel refinement,
+  corner identity kept frame to frame), orientation from the lane pattern, phone position and
+  focal length from the mat's perspective, and the lights' height corrected (`vision/matView.ts`,
+  `vision/handheld.ts`).
+- Track code (`race/route.ts`): sections a–g as described at the venue, measured on a rectified
+  photo of the mat; arc turns, or spins on the spot in 45° steps for the slowest speeds; sideways
+  offsets around the cones on c. Editable in the app.
+- Estimator (`race/estimator.ts`): Kalman filter on the axle pose from the wheel commands and the
+  camera fixes, folding late fixes in at their capture time, learning turning bias, speed scale
+  and turn scale. Follower (`race/follower.ts`): curvature steering with every moving wheel above
+  its deadband (right wheel with its trim), speed raised in tight arcs, timed spins. Run
+  (`race/autoRun.ts`): 25 Hz control, line-sensor guard, off-track stop, STOP/page hidden/
+  disconnect stop it, full logging and an "Auto runs" section in report.md.
+- Full-screen run view (camera, route overlay, Start/STOP); map of the mat with the camera fixes
+  and the estimate; track editor; tuning.
+- Simplified tab bar: Connect, Drive, Auto, Data; lab tools behind Data → Settings → Lab tools.
+- Simulator: the synthetic mat is now the measured 200 × 300 cm track; a hand-held simulated phone
+  camera (`sim/camera.ts`); the mock robot behaves like puguz.
+- Tests: mat finder from four sides, with clutter and shake; camera pose; parallax; route closure
+  and cone offsets; estimator and motor model; closed-loop laps (`testing/simLap.ts`); two full
+  camera-assisted laps through the mock link and rendered frames; the route on the venue photo.
+- docs/track.md: the track, its coordinates and the track code.
+

@@ -6,6 +6,7 @@ import { CameraScreen } from './screens/CameraScreen';
 import { ConnectScreen } from './screens/ConnectScreen';
 import { ConsoleScreen } from './screens/ConsoleScreen';
 import { DataScreen } from './screens/DataScreen';
+import { AutoScreen } from './screens/AutoScreen';
 import { DriveScreen } from './screens/DriveScreen';
 import { MonitorScreen } from './screens/MonitorScreen';
 import { TestsScreen } from './screens/TestsScreen';
@@ -21,6 +22,7 @@ export function App() {
         {tab === 'monitor' && <MonitorScreen />}
         {tab === 'console' && <ConsoleScreen />}
         {tab === 'drive' && <DriveScreen />}
+        {tab === 'auto' && <AutoScreen />}
         {tab === 'tests' && <TestsScreen />}
         {tab === 'camera' && <CameraScreen />}
         {tab === 'data' && <DataScreen />}
