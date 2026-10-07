@@ -18,7 +18,7 @@ export default defineConfig(({ command }) => {
   const buildTime = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   const buildId = `${gitShortHash()}${isBuild ? '' : '-dev'}`;
   // GitHub Pages serves the app under /<repo>/.
-  const base = isBuild ? (process.env.RALLY_BASE ?? '/CuteBotDriver/') : '/';
+  const base = isBuild ? (process.env.RALLY_BASE ?? '/neoRacer/') : '/';
 
   return {
     base,
