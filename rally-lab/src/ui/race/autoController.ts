@@ -46,6 +46,8 @@ class AutoController {
   private sec: CamSecond = { frames: 0, mat: 0, robot: 0, proc: 0, score: 0 };
   private secTimer: ReturnType<typeof setInterval> | null = null;
   private planCache?: { key: string; plan: Plan };
+  /** The run a blink re-find is going for (one at a time). */
+  private refindHold?: AutoRun;
   private laneCache?: { key: string; pts: { x: number; y: number; headingDeg: number }[] };
   /** Recent fixes for the overlay trail. */
   readonly trail: { x: number; y: number; t: number }[] = [];
@@ -150,6 +152,17 @@ class AutoController {
       auto?.onFix(out.fix);
     }
     if (auto?.state === 'running') {
+      // Lost for a while (not along the route either): blink to find it wherever it is, then carry on.
+      const live = auto.live();
+      if (live.holding && live.heldMs > 3000 && !this.blinking && this.refindHold !== auto) {
+        this.refindHold = auto;
+        void this.findRobot().then((res) => {
+          if (res && auto.state === 'running') auto.placeAt(res.pos, clock.now());
+        }).catch(() => {}).finally(() => {
+          // another try on the next long hold
+          setTimeout(() => { if (this.refindHold === auto) this.refindHold = undefined; }, 4000);
+        });
+      }
       const p = auto.est.pose;
       this.estTrail.push({ x: p.x, y: p.y });
       if (this.estTrail.length > 2000) this.estTrail.splice(0, 500);

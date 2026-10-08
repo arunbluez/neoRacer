@@ -144,6 +144,14 @@ export function offsetAt(offsets: OffsetRange[] | undefined, d: number, rampCm =
   return o;
 }
 
+/** The route as painted: the lane's centre line, without the sideways dodges. */
+export function withoutOffsets(spec: RouteSpec): RouteSpec {
+  return {
+    ...spec,
+    sections: spec.sections.map((sec) => ({ ...sec, parts: sec.parts.map((p) => (p.kind === 'straight' ? { kind: 'straight' as const, lengthCm: p.lengthCm } : p)) })),
+  };
+}
+
 /** A copy of the route with one offset range's sideways shift changed (the cone dodges). */
 export function withOffset(spec: RouteSpec, section: string, part: number, range: number, offsetCm: number): RouteSpec {
   return {

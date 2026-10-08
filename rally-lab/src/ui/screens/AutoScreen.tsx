@@ -141,7 +141,7 @@ export function AutoScreen() {
         </div>
         {live && (running || live.reason) && (
           <div className="runview-line">
-            {running ? (live.holding ? 'LOST: holding, looking for the robot' : 'running') : live.reason} · {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
+            {running ? (live.recovering ? `RECOVERING: ${live.recovering}` : live.holding ? 'LOST: holding, looking for the robot' : 'running') : live.reason} · {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
             {live.step && live.step.kind === 'path' ? ` · off ${fmt(live.step.e, 1)} cm` : ''}
           </div>
         )}
@@ -152,6 +152,20 @@ export function AutoScreen() {
   return (
     <div>
       {!lab.link.connected && <div className="card warn-text">Robot not connected{lab.settings.mockRobot ? ' (mock robot is on: connect it on the Connect tab)' : ''}.</div>}
+      {lab.link.connected && lab.profile && !lab.profile.deadband && (
+        <div className="card">
+          <b className="warn-text">{lab.profile.robotId} has no motor numbers yet</b>
+          <p style={{ margin: '6px 0' }}>
+            The app drives it with default numbers, and robots differ a lot: one wheel often needs a bigger command to
+            turn at all, so the robot pulls to one side at slow speeds
+            {ac.summary && Math.abs(ac.summary.learned.biasDegS) > 8 ? ` (the last run: ${Math.abs(ac.summary.learned.biasDegS)} °/s to the ${ac.summary.learned.biasDegS > 0 ? 'right' : 'left'})` : ''}.
+            Measure it once (a few minutes): <b>Deadband</b> (T3.1, tap "Moving" when it moves), then <b>Straight check</b> (T3.7) to set the trim.
+          </p>
+          <button className="btn btn-small" onClick={() => {
+            void lab.setSettings({ labTools: true }).then(() => useApp.getState().setTab('tests'));
+          }}>Open the motor tests</button>
+        </div>
+      )}
 
       <div className="row" style={{ gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
         <span className={`badge ${cc.running ? '' : 'badge-busy'}`}>camera {cc.running ? `${fmt(useApp.getState().camFps, 0)} fps` : 'off'}</span>
@@ -250,7 +264,7 @@ export function AutoScreen() {
         {ac.error && <div className="bad-text">{ac.error}</div>}
         {live && (running || live.reason) && (
           <div className="mono" style={{ marginTop: 8 }}>
-            {running ? (live.holding ? 'LOST: holding, looking for the robot' : 'running') : live.reason} · section {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
+            {running ? (live.recovering ? `RECOVERING: ${live.recovering}` : live.holding ? 'LOST: holding, looking for the robot' : 'running') : live.reason} · section {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
             {live.step && live.step.kind === 'path' ? ` · off ${fmt(live.step.e, 1)} cm` : ''}
             {running ? ` · camera ${Number.isFinite(live.lastFixAgeMs) ? `${fmt(live.lastFixAgeMs, 0)} ms ago` : 'none'}` : ''}
           </div>

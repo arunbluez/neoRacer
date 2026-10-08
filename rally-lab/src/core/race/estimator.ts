@@ -56,6 +56,9 @@ export type EstPose = {
   sigmaDeg: number;
 };
 
+/** A line sensor at the lane band's edge (see PoseEstimator.addEdge). */
+export type EdgeObs = { c: { x: number; y: number }; n: { x: number; y: number }; offsetCm: number; ahead: number; right: number; sigmaCm?: number };
+
 export type FixResult = { used: boolean; reason?: string; dx: number; dy: number; nis: number };
 
 const N = 6; // x, y, θ (rad), bias (rad/s), speed scale, turn scale
@@ -99,6 +102,9 @@ export class PoseEstimator {
   /** Wheel commands, in the order they take effect. */
   private cmds: { t: number; l: number; r: number }[] = [{ t: -Infinity, l: 0, r: 0 }];
   private rejects = 0;
+  /** Line-edge observations of the last historyMs (replayed after a late camera fix). */
+  private edges: { t: number; e: EdgeObs }[] = [];
+  private replaying = false;
   readonly opts: EstimatorOpts;
   /** Counters for the run log. */
   stats = { fixes: 0, used: 0, rejected: 0, resets: 0 };
@@ -116,6 +122,7 @@ export class PoseEstimator {
     this.snaps = [{ t, s: [...this.s], P: [...this.P], vl: 0, vr: 0 }];
     this.cmds = [{ t: -Infinity, l: 0, r: 0 }];
     this.rejects = 0;
+    this.edges = [];
   }
 
   /**
@@ -130,6 +137,45 @@ export class PoseEstimator {
     this.P = eye([sigma.cm ** 2, sigma.cm ** 2, (sigma.deg * RAD) ** 2, pk[0], pk[1], pk[2]]);
     this.snaps = [{ t: this.t, s: [...this.s], P: [...this.P], vl: this.vl, vr: this.vr }];
     this.rejects = 0;
+    this.edges = [];
+  }
+
+  /**
+   * A line sensor at the lane band's edge: the sensor (`ahead` cm in front of
+   * the axle, `right` cm to its right) is `offsetCm` from the lane's centre line
+   * at c, measured along n (the centre line's right-hand normal). A sideways
+   * position fix, exact to a centimetre or so, where the camera is least sure
+   * (far from the phone). Applied now (the reading is ~50 ms old: well under
+   * a centimetre sideways).
+   */
+  addEdge(t: number, e: EdgeObs): { used: boolean; innov: number } {
+    if (t > this.t) this.advance(t);
+    this.edges.push({ t, e });
+    while (this.edges.length && this.edges[0].t < this.t - this.opts.historyMs) this.edges.shift();
+    const res = this.applyEdge(e);
+    this.snaps.push({ t: this.t, s: [...this.s], P: [...this.P], vl: this.vl, vr: this.vr });
+    return res;
+  }
+
+  private applyEdge(e: EdgeObs): { used: boolean; innov: number } {
+    const [x, y, th] = this.s;
+    const cos = Math.cos(th), sin = Math.sin(th);
+    const sx = x + e.ahead * cos - e.right * sin, sy = y + e.ahead * sin + e.right * cos;
+    const h = e.n.x * (sx - e.c.x) + e.n.y * (sy - e.c.y);
+    const innov = e.offsetCm - h;
+    const Hr = [e.n.x, e.n.y, e.n.x * (-e.ahead * sin - e.right * cos) + e.n.y * (e.ahead * cos - e.right * sin), 0, 0, 0];
+    const PH = Array.from({ length: N }, (_, i) => Hr.reduce((acc, hv, k) => acc + this.P[i * N + k] * hv, 0));
+    const R = (e.sigmaCm ?? 1.5) ** 2;
+    const S = Hr.reduce((acc, hv, k) => acc + hv * PH[k], 0) + R;
+    if (!(S > 0) || (innov * innov) / S > 25) return { used: false, innov };
+    const K = PH.map((v) => v / S);
+    for (let i = 0; i < N; i++) this.s[i] += K[i] * innov;
+    const P2 = new Array<number>(N * N);
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) P2[i * N + j] = this.P[i * N + j] - K[i] * PH[j];
+    for (let i = 0; i < N; i++) for (let j = 0; j < i; j++) P2[i * N + j] = P2[j * N + i] = (P2[i * N + j] + P2[j * N + i]) / 2;
+    this.P = P2;
+    this.clampState();
+    return { used: true, innov };
   }
 
   /** A command sent at tSent (it takes effect cmdLatencyMs later). */
@@ -182,11 +228,13 @@ export class PoseEstimator {
     this.t += dtMs;
   }
 
-  /** Integrate up to time t, keeping a snapshot per step. */
+  /** Integrate up to time t, keeping a snapshot per step (re-applying line edges when replaying). */
   advance(t: number): void {
     const h = this.opts.stepMs;
     while (this.t + h <= t) {
+      const t0 = this.t;
       this.step(h);
+      if (this.replaying) for (const ed of this.edges) if (ed.t > t0 && ed.t <= this.t) this.applyEdge(ed.e);
       this.snaps.push({ t: this.t, s: [...this.s], P: [...this.P], vl: this.vl, vr: this.vr });
     }
     const cutoff = this.t - this.opts.historyMs;
@@ -236,7 +284,9 @@ export class PoseEstimator {
       this.step(firstStep - this.t);
       this.snaps.push({ t: this.t, s: [...this.s], P: [...this.P], vl: this.vl, vr: this.vr });
     }
+    this.replaying = true;
     this.advance(now);
+    this.replaying = false;
     if (this.t < now) this.step(now - this.t);
     return res;
   }

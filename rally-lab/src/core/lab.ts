@@ -223,7 +223,11 @@ export class Lab {
   createAuto(settings: AutoSettings): AutoRun {
     if (this.auto?.state === 'running') throw new Error('An auto run is already going.');
     if (this.runner.running) throw new Error('A test is running.');
-    this.auto = new AutoRun({ link: this.link, poller: this.poller, logger: this.logger, clock: this.deps.clock, profile: this.profile }, settings);
+    this.auto = new AutoRun({
+      link: this.link, poller: this.poller, logger: this.logger, clock: this.deps.clock, profile: this.profile,
+      // Motor commands and line queries in one write while driving: the link manages ~15 writes a second.
+      setPacking: (on) => this.link.configure({ packWrites: on || this.settings.packWrites }),
+    }, settings);
     this.emit();
     return this.auto;
   }

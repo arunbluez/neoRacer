@@ -168,3 +168,23 @@
   the cones is a ~22 cm radius bend instead of a 5–8 cm one; sliders on the Auto screen to move them.
 - Logged: `auto.lost`, `auto.found`, `auto.resync`; holds in the summary.
 
+## Recover instead of stopping (2026-10-08, field test 3)
+
+- Field logs (zopip, six runs): every run ended at the first problem (five left the lane, one
+  stuck). zopip had no motor numbers; the estimator found it pulling 25–38 °/s to the right and its
+  right wheel barely turning at low commands. Bluetooth writes took ~60 ms (24 ms the day before),
+  so the control loop ran at ~9 Hz.
+- Recovery: off the lane, stuck or off the path, the run backs up until the line sensors see the
+  lane, waits for the camera, picks the route up where the robot is, turns on the spot towards it
+  if needed and drives on; gives up after 8 recoveries or 3 at one spot. Logged as `auto.recover`
+  and `auto.recovered`; `recoveries` in the summary.
+- Lost by the camera: holds, searches along the route, and after 3 s blinks the lights to find the
+  robot anywhere and carries on (`auto.placed`); gives up after 30 s (was 8).
+- Line sensors as position fixes (`auto.edge`): a sensor reading black is at the band's edge, a
+  sideways measurement in the estimator (kept through the replay of late camera fixes).
+- Motor commands and line queries packed into one write during a run.
+- Auto screen: a note when the robot has no motor numbers, with a button to the motor tests.
+- Tests: leaving the lane and carrying on; stuck then freed; stuck for good (gives up); a robot
+  like zopip (default numbers, weak right wheel, camera off by cm at the far end) finishing, and
+  the same robot calibrated finishing with fewer recoveries.
+
