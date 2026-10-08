@@ -69,7 +69,7 @@ describe('route', () => {
     expect(offsetAt(r, -20)).toBe(0);
     expect(offsetAt(r, 50)).toBe(0);
     // The swap between the cones of section c is a gentle bend (radius > 15 cm), not a corner.
-    const c = buildPlan(RALLY_ROUTE, 'arc').outline.filter((p) => p.section === 'c' && Math.abs(p.curv) < 1 / 26);
+    const c = buildPlan(RALLY_ROUTE, 'arc').outline.filter((p) => p.section === 'c' && !p.turn);
     expect(Math.max(...c.map((p) => Math.abs(p.curv)))).toBeLessThan(1 / 15);
     // Changing one dodge leaves the rest alone.
     const w = withOffset(RALLY_ROUTE, 'c', 0, 1, 6);

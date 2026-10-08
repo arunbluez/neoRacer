@@ -12,7 +12,10 @@ import { defaultMarkerColor } from '../vision/color';
 import { HandheldTracker } from '../vision/handheld';
 import { laneModel } from '../vision/laneFit';
 import { AutoRun, DEFAULT_AUTO_SETTINGS, trackingGate, type AutoSettings } from './autoRun';
+import { analyzeRuns } from './lapAnalysis';
+import { quickTune } from './learner';
 import { buildPlan, RALLY_ROUTE } from './route';
+import { effectiveTuning } from './speedProfile';
 
 const track = makeSyntheticTrack({ cmPerPx: 0.5 });
 const { cum, total } = pathLengths(track.centerline);
@@ -83,6 +86,7 @@ describe('camera-assisted auto run (simulated)', () => {
 
   it('drives a lap with arc turns, staying in the lane', async () => {
     const { summary, worst, fixes, events, lab } = await lap({ style: 'arc', speedCmS: 30 });
+    if (process.env.DUMP_ARC) (await import('node:fs')).writeFileSync(process.env.DUMP_ARC, events.map((e) => JSON.stringify(e)).join('\n'));
     expect(summary.reason).toBe('finished');
     expect(summary.finished).toBe(true);
     expect(worst).toBeLessThan(9); // the lane band is ±11 cm
@@ -95,6 +99,15 @@ describe('camera-assisted auto run (simulated)', () => {
     expect(report).toContain('## Auto runs (camera assisted)');
     expect(report).toContain('### Auto run 1 — finished');
     expect(report).toMatch(/\| g \| [0-9.]+ \|/);
+    // The log reads back as a run the quick tune can learn from: everything clean, so faster.
+    const [run] = analyzeRuns(events, 'sim');
+    expect(run.finished).toBe(true);
+    expect(run.sections.every((x) => x.completed && x.straight)).toBe(true);
+    expect(run.sections.find((x) => x.id === 'c')!.straight!.fixes).toBeGreaterThan(20);
+    const cur = effectiveTuning(run.tuning, lab.auto!.profile);
+    const q = quickTune(run, cur, 1);
+    expect(q.tuning.sections.b.straightCmS).toBeGreaterThan(cur.sections.b.straightCmS);
+    expect(q.tuning.sections.g.straightCmS).toBeGreaterThan(cur.sections.g.straightCmS);
   }, 60_000);
 
   it('drives a lap with spin turns at the slowest speed', async () => {

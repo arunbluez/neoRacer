@@ -6,6 +6,7 @@ Tools for the [Next App Robot Rally 2026](docs/contest.md): driving an Elecfreak
 | Folder | What |
 | --- | --- |
 | [`rally-lab/`](rally-lab/) | **Rally Lab**, a PWA for Chrome on Android: manual driving, a **camera-assisted auto run** of the track with the phone held by hand, and (behind Lab tools) repeatable link, sensor, motion and camera experiments, all logged. See its [README](rally-lab/README.md). |
+| [`rally-lab/engineer/`](rally-lab/engineer/) | The **race engineer**: between laps, Claude reads the auto runs and sets the next lap's per-section speeds, braking and acceleration (Claude Agent SDK, on your Claude Code login). |
 | [`docs/`](docs/) | [The track](docs/track.md) (layout, measurements, track code), [field notes](docs/field-notes-2026-10-07.md) measured on a real robot, the [Rally Lab PRD](docs/rally-lab-prd.md) and the [contest rules](docs/contest.md). |
 | [`reference/`](reference/) | The robot firmware source [`microbitapi.js`](reference/microbitapi.js) (the source of truth for robot behaviour) and the original [`ReactNativeApi.ts`](reference/ReactNativeApi.ts) driver, copied from [droidconHQ/CuteBotDriver](https://github.com/droidconHQ/CuteBotDriver). The robots at the event come flashed with this firmware. |
 

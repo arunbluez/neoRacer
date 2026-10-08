@@ -197,3 +197,26 @@
 - Up to 20 recoveries a lap (was 8; still 3 at one spot at most), so practice laps finish and log
   the whole track.
 
+## Lap tuning and the race engineer (2026-10-08)
+
+- Lap tuning (`race/tuning.ts`): per-section straight and turn speeds, acceleration, braking,
+  grip and steering distance; limits, and a 25 % cap on any rise per step. Without a tuning the
+  robot drives the constant speeds exactly as before.
+- Speed profile (`race/speedProfile.ts`): target speed along the plan from the tuning (forward
+  pass for acceleration, backward pass for braking, grip limit in turns, the deadband and the
+  inner wheel's needs as floors), read slightly ahead by the follower; predicted lap time per
+  section. A simulated lap with straights at 50 cm/s takes 19.9 s against 29.7 s at a constant
+  30 cm/s, 19.6 s predicted.
+- Lap analysis (`race/lapAnalysis.ts`): every auto run from the log, each section split into
+  straights and turns (time, speed, distance off the path, heading error, line events, camera
+  fixes, corrections and gaps), where it stopped.
+- Quick tune (`race/learner.ts`): the next tuning by rules from the last run.
+- Race engineer: `race/engineerBrief.ts` (what Claude is told, its tools, the answer's schema),
+  `race/engineerPlan.ts` (the plan file, reading it back from a file or a pasted message, checks,
+  track code edits within 15 % / 15 cm), and the laptop command `engineer/` (Claude Agent SDK on
+  the Claude Code login, default model Haiku 5.5, tools `predict_lap` and `section_trace`,
+  structured output; `--offline`, `--dry-run`, `--watch`).
+- Auto screen: Lap tuning card (tuning, predicted times, runs, Quick tune, Send runs to the
+  engineer, Load/Paste plan, Copy brief for the Claude app, review before Apply, Undo, Keep for
+  the race). The speed slider gives way to the tuning while one is set.
+- Run summary: tuning, predicted time, line events per section.

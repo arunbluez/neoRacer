@@ -95,6 +95,8 @@ export type PathPt = {
   /** 1/cm, positive = turning right. */
   curv: number;
   section: string;
+  /** On one of the route's turns (arc style), not a straight. */
+  turn?: boolean;
 };
 
 export type Leg =
@@ -263,7 +265,7 @@ export function buildPlan(spec: RouteSpec, style: TurnStyle, popts: PlanOpts = {
     for (let i = 1; i <= n; i++) {
       const a = a0 + (sweep * i) / n;
       c.s += (Math.abs(sweep) * r) / n;
-      push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a), s: c.s, headingDeg: wrapDeg(c.h + (deg * i) / n), curv: sgn / r, section });
+      push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a), s: c.s, headingDeg: wrapDeg(c.h + (deg * i) / n), curv: sgn / r, section, turn: true });
     }
     c.x = cx + r * Math.cos(a0 + sweep);
     c.y = cy + r * Math.sin(a0 + sweep);

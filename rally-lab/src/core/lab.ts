@@ -4,6 +4,7 @@
 
 import { RobotLink } from './link/link';
 import { AutoRun, type AutoSettings } from './race/autoRun';
+import { analyzeRuns, type RunAnalysis } from './race/lapAnalysis';
 import { zipSession, zipSessions, type SessionBundle } from './log/export';
 import { buildReport, type AutoRunReport } from './log/report';
 import type { LogEvent } from './log/events';
@@ -296,6 +297,12 @@ export class Lab {
 
   async sessionRuns(sessionId = this.logger.sessionId): Promise<TestRun[]> {
     return this.store.listTestRuns(sessionId);
+  }
+
+  /** The session's auto runs, analysed section by section (for the lap tuning). */
+  async autoRunAnalyses(sessionId = this.logger.sessionId): Promise<RunAnalysis[]> {
+    if (sessionId === this.logger.sessionId) await this.logger.flush();
+    return analyzeRuns(await this.store.events(sessionId), sessionId);
   }
 
   /** Everything export needs for one session, with report.md. */
