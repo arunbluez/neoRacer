@@ -55,7 +55,9 @@ export function drawLiveOverlay(
       const a = (k / 24) * Math.PI * 2;
       ring.push(toImg({ x: c.x + gate.radiusCm * Math.cos(a), y: c.y + gate.radiusCm * Math.sin(a) }));
     }
-    polyline(g, ring, scale, gate.why === 'blink' ? 'rgba(0,255,102,0.9)' : 'rgba(255,255,255,0.6)', true, 1.5);
+    polyline(g, ring, scale, gate.why === 'blink' ? 'rgba(0,255,102,0.9)' : gate.why === 'lost' ? 'rgba(255,179,71,0.9)' : 'rgba(255,255,255,0.6)', true, 1.5);
+    // Lost: it also looks along the route back to where it last saw the robot.
+    if (gate.trail?.length) polyline(g, gate.trail.map(toImg), scale, 'rgba(255,179,71,0.55)', false, Math.max(3, (gate.trailRadiusCm ?? 10) * 0.4));
   }
   // the robot as the camera sees it
   if (last.fix) {

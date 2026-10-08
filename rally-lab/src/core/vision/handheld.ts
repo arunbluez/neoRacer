@@ -45,7 +45,15 @@ export type CamFix = {
 };
 
 /** Where to look for our robot: a circle on the mat (ground cm). */
-export type Gate = { center: Pt; radiusCm: number };
+/** Where our robot can be: a circle, plus optionally a strip along a polyline (trail) of the given half-width. */
+export type Gate = { center: Pt; radiusCm: number; trail?: Pt[]; trailRadiusCm?: number };
+
+/** Inside the gate (the circle, or near the trail). */
+export function inGate(g: Gate, p: Pt): boolean {
+  if (Math.hypot(p.x - g.center.x, p.y - g.center.y) <= g.radiusCm) return true;
+  const r = g.trailRadiusCm ?? 0;
+  return !!g.trail && r > 0 && g.trail.some((q) => Math.hypot(p.x - q.x, p.y - q.y) <= r);
+}
 
 export type Blob = { x: number; y: number; raw: Pt; px: Pt; area: number };
 
@@ -169,11 +177,11 @@ export class HandheldTracker {
     let win: Rect = { x0: 0, y0: 0, x1: frame.width, y1: frame.height };
     if (gate) {
       // The gate's box in the frame (seen positions are pushed away from the camera: widen a little).
-      const r = gate.radiusCm * 1.3 + 4;
-      const c = gate.center;
-      const pts = [{ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y - r }, { x: c.x + r, y: c.y + r }, { x: c.x - r, y: c.y + r }]
-        .map((p) => applyH(cur.G, p)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-      if (pts.length === 4) {
+      const boxes: { c: Pt; r: number }[] = [{ c: gate.center, r: gate.radiusCm * 1.3 + 4 }];
+      for (const q of gate.trail ?? []) boxes.push({ c: q, r: (gate.trailRadiusCm ?? 0) * 1.3 + 4 });
+      const corners = boxes.flatMap(({ c, r }) => [{ x: c.x - r, y: c.y - r }, { x: c.x + r, y: c.y - r }, { x: c.x + r, y: c.y + r }, { x: c.x - r, y: c.y + r }]);
+      const pts = corners.map((p) => applyH(cur.G, p)).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (pts.length === corners.length) {
         win = {
           x0: Math.max(0, Math.min(...pts.map((p) => p.x)) - 6), y0: Math.max(0, Math.min(...pts.map((p) => p.y)) - 6),
           x1: Math.min(frame.width, Math.max(...pts.map((p) => p.x)) + 6), y1: Math.min(frame.height, Math.max(...pts.map((p) => p.y)) + 6),
@@ -206,7 +214,7 @@ export class HandheldTracker {
       }
       host.area = a;
     }
-    return gate ? merged.filter((b) => Math.hypot(b.x - gate.center.x, b.y - gate.center.y) <= gate.radiusCm) : merged;
+    return gate ? merged.filter((b) => inGate(gate, b)) : merged;
   }
 
   private maskBuf?: Uint8Array;

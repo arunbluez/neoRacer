@@ -222,6 +222,30 @@ export class Follower {
     return null;
   }
 
+  /**
+   * Pick the route up again at the point nearest the robot, from backCm behind
+   * the current progress to 40 cm ahead (after the camera found the robot
+   * away from its estimate).
+   */
+  resync(pose: { x: number; y: number }, backCm = 250): void {
+    // Not in the middle of a spin.
+    if (this.leg?.kind !== 'path') return;
+    const s0 = this.progress;
+    let best = { leg: -1, idx: 0, d: Infinity };
+    this.plan.legs.forEach((leg, li) => {
+      if (leg.kind !== 'path') return;
+      leg.pts.forEach((p, i) => {
+        if (p.s < s0 - backCm || p.s > s0 + 40) return;
+        const d = (p.x - pose.x) ** 2 + (p.y - pose.y) ** 2;
+        if (d < best.d) best = { leg: li, idx: i, d };
+      });
+    });
+    if (best.leg < 0) return;
+    this.legIdx = best.leg;
+    this.idx = best.idx;
+    this.spin = undefined;
+  }
+
   /** The path point nearest the current progress (for overlays). */
   target(): PathPt | undefined {
     const leg = this.leg;

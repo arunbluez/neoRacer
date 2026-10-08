@@ -155,6 +155,19 @@
 - Full screen: big Close, Find my robot and Re-detect track buttons. The camera's zoom range is
   shown and logged (no ultra-wide on phones where Chrome offers only one back camera).
 
+## Auto run, second field test (2026-10-08)
+
+- Lost robot: when the camera hasn't seen the robot for 1 s (4 s around the bridge), the robot
+  holds still and the camera searches along the route back to where it last saw it. Found, the
+  estimate moves there with the route's heading (keeping the learned motor numbers) and the
+  follower picks the route up there; after any big camera correction the follower re-finds its
+  place too. Gives up after 8 s. In the field the robot got stuck on a cone after the bridge, the
+  estimate drove on, and the camera kept looking around the estimate, never where the robot was.
+- Stuck: the camera seeing the robot not move for 1.5 s while it is driven stops the run.
+- Cone dodges on c: 4.5 cm each way (was 2.5 and 3.5), ramps 25 cm (was 15) so the swap between
+  the cones is a ~22 cm radius bend instead of a 5–8 cm one; sliders on the Auto screen to move them.
+- Logged: `auto.lost`, `auto.found`, `auto.resync`; holds in the summary.
+
 ## Lap tuning and the race engineer (2026-10-08)
 
 - Lap tuning (`race/tuning.ts`): per-section straight and turn speeds, acceleration, braking,
@@ -177,7 +190,4 @@
 - Auto screen: Lap tuning card (tuning, predicted times, runs, Quick tune, Send runs to the
   engineer, Load/Paste plan, Copy brief for the Claude app, review before Apply, Undo, Keep for
   the race). The speed slider gives way to the tuning while one is set.
-- Track code: the cone offsets on c ramp over 25 cm instead of 15. The swap from one side to the
-  other between the cones was as sharp as a 10 cm radius turn, and the follower sped up to
-  ~40 cm/s there to keep the inner wheel turning; now it is a gentle bend (~27 cm/s).
 - Run summary: tuning, predicted time, line events per section.

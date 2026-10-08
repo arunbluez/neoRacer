@@ -20,7 +20,14 @@ const track = makeSyntheticTrack({ cmPerPx: 0.5 });
 const { cum, total } = pathLengths(track.centerline);
 const model = laneModel(buildPlan(paintedRoute(RALLY_ROUTE), 'arc').outline, 9, 200, 300, 2);
 
-async function lap(settings: Partial<AutoSettings>, camera = true) {
+type Hooks = {
+  /** The camera can't see the robot (ms since the start). */
+  hide?: (ms: number) => boolean;
+  /** Change the world as the run goes (ms since the start, where the robot really is). */
+  world?: (ms: number, w: { params: { linear?: { a: number; b: number } } }, truth: { x: number; y: number }) => void;
+};
+
+async function lap(settings: Partial<AutoSettings>, camera = true, hooks: Hooks = {}) {
   const { lab, mock, clock, store } = await makeLab({ withTrack: true });
   Object.assign(mock.world.params, PUGUZ_SIM);
   await lab.updateProfile(PUGUZ_PROFILE);
@@ -30,12 +37,16 @@ async function lap(settings: Partial<AutoSettings>, camera = true) {
   const tracker = new HandheldTracker({ model, marker: defaultMarkerColor(s.lightColor), minAreaPx: 3, markerHeightCm: s.markerHeightCm });
   const shake = new HandShake(HANDHELD_AT_B, 1, 11);
   let worst = 0, frames = 0, fixes = 0;
+  let tStart = Infinity;
   let worstAt = { x: 0, y: 0, sec: '' };
   const cam = setInterval(() => {
     const t = clock.now();
     const tCap = t - 60; // exposure + delivery
     const w = mock.world;
+    if (auto.state === 'running' && tStart === Infinity) tStart = t;
+    const ms = t - tStart;
     const truth = w.poseAt(tCap);
+    hooks.world?.(ms, w, truth);
     if (auto.state === 'running') {
       const d = nearestOnPath(track.centerline, cum, total, truth.x, truth.y).d;
       if (d > worst) {
@@ -46,7 +57,7 @@ async function lap(settings: Partial<AutoSettings>, camera = true) {
     if (!camera) return;
     const proj = projector(shake.at(tCap), 480, 360);
     const img = renderMatView(track.image, 200, 300, proj);
-    drawSimRobot(img, proj, truth, w.lightsAt(tCap), CUTEBOT_LOOK, [track.bridge]);
+    if (!hooks.hide?.(ms)) drawSimRobot(img, proj, truth, w.lightsAt(tCap), CUTEBOT_LOOK, [track.bridge]);
     const gate = trackingGate({ auto, now: clock.now(), route: RALLY_ROUTE, markerAheadCm: s.markerAheadCm });
     const out = tracker.process({ ...img, tCaptureMs: tCap }, () => clock.now(), gate);
     frames++;
@@ -103,6 +114,40 @@ describe('camera-assisted auto run (simulated)', () => {
     expect(worst).toBeLessThan(10);
     expect(summary.spins.length).toBe(24);
   }, 90_000);
+
+  it('holds when the camera loses a robot that fell behind, finds it along the route, and carries on', async () => {
+    // Out of the bridge on c, the robot crawls (pushing a cone) out of the camera's sight while the
+    // estimate drives on. Hold late (2.5 s) so the estimate gets well ahead: the camera has to find
+    // the robot along the route behind it, not near the estimate.
+    const slow = { a: 0.25, b: 0 };
+    let t0 = -1;
+    const { summary, worst, events } = await lap({ style: 'arc', speedCmS: 22, lostPauseMs: 2500 }, true, {
+      hide: (ms) => t0 >= 0 && ms - t0 < 3500,
+      world: (ms, w, truth) => {
+        if (t0 < 0 && truth.x > 130 && truth.y < 200) t0 = ms;
+        w.params.linear = t0 >= 0 && ms - t0 < 2500 ? slow : PUGUZ_SIM.linear;
+      },
+    });
+    if (process.env.DUMP) console.log(JSON.stringify(events.filter((e) => ['auto.lost', 'auto.found', 'auto.resync', 'auto.end'].includes(e.k)).map((e) => ({ ...e, sections: undefined })), null, 0), worst);
+    const kinds = events.map((e) => e.k);
+    expect(kinds).toContain('auto.lost');
+    expect(kinds).toContain('auto.found');
+    const rs = events.filter((e) => e.k === 'auto.resync');
+    expect(rs.length).toBeGreaterThan(0);
+    expect(Math.max(...rs.map((e) => Number(e.from) - Number(e.s)))).toBeGreaterThan(15); // picked up well behind where it thought it was
+    expect(summary.holds).toBeGreaterThanOrEqual(1);
+    expect(summary.reason).toBe('finished');
+    expect(worst).toBeLessThan(10);
+  }, 90_000);
+
+  it('stops when the camera sees the robot stuck', async () => {
+    const { summary } = await lap({ style: 'arc', speedCmS: 22 }, true, {
+      world: (ms, w) => {
+        w.params.linear = ms > 2500 ? { a: 0, b: 0 } : PUGUZ_SIM.linear;
+      },
+    });
+    expect(summary.reason).toMatch(/^stuck/);
+  }, 60_000);
 
   it('stops when told to, and when the page is hidden', async () => {
     const { lab, mock, clock } = await makeLab({ withTrack: true });

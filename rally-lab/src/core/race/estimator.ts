@@ -118,6 +118,20 @@ export class PoseEstimator {
     this.rejects = 0;
   }
 
+  /**
+   * Put the robot somewhere else (the camera found it away from the estimate)
+   * with the heading the route has there, keeping what was learned about its
+   * motors (bias, speed and turn scale).
+   */
+  relocate(pose: { x: number; y: number; headingDeg: number }, sigma: { cm: number; deg: number } = { cm: 3, deg: 12 }): void {
+    const keep = [this.s[3], this.s[4], this.s[5]];
+    const pk = [this.P[3 * N + 3], this.P[4 * N + 4], this.P[5 * N + 5]];
+    this.s = [pose.x, pose.y, pose.headingDeg * RAD, keep[0], keep[1], keep[2]];
+    this.P = eye([sigma.cm ** 2, sigma.cm ** 2, (sigma.deg * RAD) ** 2, pk[0], pk[1], pk[2]]);
+    this.snaps = [{ t: this.t, s: [...this.s], P: [...this.P], vl: this.vl, vr: this.vr }];
+    this.rejects = 0;
+  }
+
   /** A command sent at tSent (it takes effect cmdLatencyMs later). */
   setCommand(tSent: number, l: number, r: number): void {
     const last = this.cmds[this.cmds.length - 1];

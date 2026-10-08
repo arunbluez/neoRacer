@@ -17,6 +17,7 @@ import { LapTuning } from '../race/LapTuning';
 import { TrackEditor } from '../race/TrackEditor';
 import { drawLiveOverlay, MatMap } from '../race/views';
 import { SIDES } from '../../core/vision/handheld';
+import { withOffset, type RouteSpec } from '../../core/race/route';
 
 const COLORS: { name: string; rgb: { r: number; g: number; b: number } }[] = [
   { name: 'green', rgb: { r: 0, g: 255, b: 0 } },
@@ -141,7 +142,7 @@ export function AutoScreen() {
         </div>
         {live && (running || live.reason) && (
           <div className="runview-line">
-            {running ? 'running' : live.reason} · {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
+            {running ? (live.holding ? 'LOST: holding, looking for the robot' : 'running') : live.reason} · {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
             {live.step && live.step.kind === 'path' ? ` · off ${fmt(live.step.e, 1)} cm` : ''}
           </div>
         )}
@@ -257,12 +258,14 @@ export function AutoScreen() {
         {ac.error && <div className="bad-text">{ac.error}</div>}
         {live && (running || live.reason) && (
           <div className="mono" style={{ marginTop: 8 }}>
-            {running ? 'running' : live.reason} · section {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
+            {running ? (live.holding ? 'LOST: holding, looking for the robot' : 'running') : live.reason} · section {live.section} · {fmt(live.progress, 0)}/{fmt(live.lengthCm, 0)} cm · {fmt(live.t / 1000, 1)} s
             {live.step && live.step.kind === 'path' ? ` · off ${fmt(live.step.e, 1)} cm` : ''}
             {running ? ` · camera ${Number.isFinite(live.lastFixAgeMs) ? `${fmt(live.lastFixAgeMs, 0)} ms ago` : 'none'}` : ''}
           </div>
         )}
       </div>
+
+      <ConeDodges route={ac.route} disabled={running} onChange={(r) => set({ route: r })} />
 
       <div className="card">
         <MatMap plan={plan} lane={ac.lane()} route={ac.route} fixes={ac.trail} est={ac.estTrail} auto={auto} />
@@ -334,6 +337,45 @@ function Advanced({ s, set, disabled }: { s: AutoSettings; set: (p: Partial<Auto
       {row('Lights ahead of the wheels', 'markerAheadCm', 0, 10, 0.5, ' cm')}
       {row('Command delay', 'cmdLatencyMs', 0, 150, 5, ' ms')}
       <small className="hint">Leave these alone for the first runs; the logs say what to change.</small>
+    </div>
+  );
+}
+
+/**
+ * The sideways dodges around the cones (the track code's offset ranges), as
+ * sliders: the cones move from day to day; watch the route line on the live
+ * picture and move it clear of them.
+ */
+function ConeDodges({ route, disabled, onChange }: { route: RouteSpec; disabled: boolean; onChange: (r: RouteSpec | undefined) => void }) {
+  const rows: { section: string; part: number; range: number; from: number; to: number; offsetCm: number }[] = [];
+  for (const sec of route.sections) {
+    sec.parts.forEach((p, part) => {
+      if (p.kind !== 'straight' || !p.offsets) return;
+      p.offsets.forEach((o, range) => rows.push({ section: sec.id, part, range, from: o.from, to: o.to, offsetCm: o.offsetCm }));
+    });
+  }
+  if (!rows.length) return null;
+  return (
+    <div className="card">
+      <b>Cone dodges</b>
+      {rows.map((r) => (
+        <label className="field" key={`${r.section}-${r.part}-${r.range}`}>
+          <span>
+            {r.section}, {r.from}–{r.to} cm into the straight: pass {Math.abs(r.offsetCm)} cm to the {r.offsetCm < 0 ? 'left' : r.offsetCm > 0 ? 'right' : '(centre)'}
+          </span>
+          <input
+            type="range" min={-8} max={8} step={0.5} value={r.offsetCm} disabled={disabled}
+            onChange={(e) => onChange(withOffset(route, r.section, r.part, r.range, Number(e.target.value)))}
+          />
+        </label>
+      ))}
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn btn-small" disabled={disabled} onClick={() => onChange(undefined)}>Back to the measured track</button>
+      </div>
+      <small className="hint">
+        The route line on the live picture moves as you slide: put it where the robot clears the cones (it is ~10 cm wide).
+        Left/right as the robot drives. Keep within ±6 cm so the robot stays on the lane.
+      </small>
     </div>
   );
 }

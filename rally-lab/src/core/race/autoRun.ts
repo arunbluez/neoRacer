@@ -48,6 +48,16 @@ export type AutoSettings = {
   tickMs: number;
   /** Stop when the camera shows the robot this far off the path for half a second (0 = never). */
   offTrackStopCm: number;
+  /**
+   * Hold still when the camera hasn't seen the robot for this long, ms (0 =
+   * drive on blind); longer under the bridge. While it holds, the camera looks
+   * along the route back to where it last saw the robot, and the run carries
+   * on from where it finds it. Gives up after lostStopMs.
+   */
+  lostPauseMs: number;
+  lostStopMs: number;
+  /** Stop when the camera sees the robot not moving for this long while it is driven, ms (0 = never). */
+  stuckStopMs: number;
   /** The track code in use; undefined = the measured Robot Rallye track. */
   route?: RouteSpec;
   /** Lap tuning: per-section speeds, acceleration and braking; undefined = the constant speeds above. */
@@ -82,24 +92,36 @@ export const DEFAULT_AUTO_SETTINGS: AutoSettings = {
   lightColor: { r: 0, g: 255, b: 0 },
   tickMs: 40,
   offTrackStopCm: 18,
+  lostPauseMs: 1000,
+  lostStopMs: 8000,
+  stuckStopMs: 1500,
   matRot: null,
   version: 3,
 };
 
-/** Where the camera should look for our robot: a circle on the mat (ground cm). */
-export type TrackGate = { center: { x: number; y: number }; radiusCm: number; why: 'run' | 'blink' | 'start' };
+/**
+ * Where the camera should look for our robot (mat cm, ground): a circle, and
+ * while the robot is unseen also a strip along the route (trail) back to
+ * where it was last seen.
+ */
+export type TrackGate = {
+  center: { x: number; y: number };
+  radiusCm: number;
+  why: 'run' | 'lost' | 'blink' | 'start';
+  trail?: { x: number; y: number }[];
+  trailRadiusCm?: number;
+};
 
 /**
- * During a run: around the estimate (wider when it is unsure). Before it:
- * where the blink test found the robot (for two minutes), else the start line.
+ * During a run: around the estimate (wider when it is unsure), plus the
+ * route back to where the camera last saw the robot when it hasn't seen it
+ * for a moment. Before it: where the blink test found the robot (for two
+ * minutes), else the start line.
  */
 export function trackingGate(o: {
   auto?: AutoRun; identified?: { x: number; y: number; t: number } | null; now: number; route: RouteSpec; markerAheadCm: number;
 }): TrackGate {
-  if (o.auto?.state === 'running') {
-    const c = o.auto.hint()!;
-    return { center: c, radiusCm: Math.min(40, 15 + 2 * o.auto.est.pose.sigmaCm), why: 'run' };
-  }
+  if (o.auto?.state === 'running') return o.auto.searchArea(o.now);
   if (o.identified && o.now - o.identified.t < 120_000) return { center: { x: o.identified.x, y: o.identified.y }, radiusCm: 12, why: 'blink' };
   const st = o.route.start;
   const th = (st.headingDeg * Math.PI) / 180;
@@ -124,6 +146,8 @@ export type AutoSummary = {
   sections: { id: string; timeMs: number; maxErrCm: number; meanErrCm: number; fixes: number; lineEvents: number }[];
   fixes: { total: number; used: number; rejected: number; resets: number };
   lineEvents: number;
+  /** Times it held still because the camera had lost it. */
+  holds: number;
   learned: { biasDegS: number; speedScale: number; turnScale: number };
   spins: { section: string; deltaDeg: number; durMs: number; headingErrAfterDeg?: number }[];
 };
@@ -138,6 +162,8 @@ export type AutoLive = {
   lengthCm: number;
   section: string;
   reason?: string;
+  /** Holding still: the camera lost the robot. */
+  holding: boolean;
 };
 
 type Deps = {
@@ -170,6 +196,13 @@ export class AutoRun {
   private lineEvents = 0;
   private nudge = { k: 0, until: -Infinity };
   private offTrackSince: number | null = null;
+  /** Progress along the plan where the camera last saw the robot, cm. */
+  private seenS = 0;
+  /** Holding still since (the camera lost the robot). */
+  private holdSince: number | null = null;
+  private holds = 0;
+  /** Recent camera positions while driving (stuck detection). */
+  private recent: { t: number; x: number; y: number }[] = [];
   private sections = new Map<string, SectionStats>();
   private lastStep?: FollowStep;
   private resolve?: (s: AutoSummary) => void;
@@ -228,6 +261,8 @@ export class AutoRun {
     }
     this.state = 'running';
     this.t0 = now;
+    // The camera has a moment to see the robot before the run holds for it.
+    this.lastFixT = now;
     this.est.reset(sp.pose, now, sp.from === 'camera' ? { cm: 2, deg: 8 } : { cm: 4, deg: 10 });
     for (const s of this.plan.sectionStarts) this.sections.set(s.id, { id: s.id, tStart: NaN, tEnd: NaN, maxE: 0, sumE: 0, n: 0, fixes: 0, lineEvents: 0 });
     logger.log('auto.start', {
@@ -257,7 +292,27 @@ export class AutoRun {
     this.latestFix = fix;
     if (this.state !== 'running' || !this.settings.cameraAssist) return;
     const res = this.est.addFix(fix);
-    if (res.used) this.lastFixT = fix.t;
+    if (res.reason === 'reset' || (res.used && Math.hypot(res.dx, res.dy) > 5)) {
+      // The camera found the robot away from the estimate (it slipped, got stuck, or the estimate ran
+      // on while it was out of sight): the estimate moved; pick the route up where the robot is.
+      const before = this.follower.progress;
+      this.follower.resync(this.est.pose, res.reason === 'reset' ? 250 : 60);
+      const tp = this.follower.target();
+      if (res.reason === 'reset' && tp) {
+        // Its heading is unknown after a while unseen: take the route's there (it was following it).
+        const h = (tp.headingDeg * Math.PI) / 180, a = this.settings.markerAheadCm;
+        this.est.relocate({ x: fix.x - a * Math.cos(h), y: fix.y - a * Math.sin(h), headingDeg: tp.headingDeg });
+      }
+      if (Math.abs(this.follower.progress - before) > 3) {
+        this.recent = [];
+        this.deps.logger.log('auto.resync', { from: r1(before), s: r1(this.follower.progress), x: r1(this.est.pose.x), y: r1(this.est.pose.y), why: res.reason ?? 'fix' });
+      }
+    }
+    if (res.used || res.reason === 'reset') {
+      this.lastFixT = Math.max(this.lastFixT, fix.t);
+      this.seenS = this.follower.progress;
+    }
+    if (res.used) this.checkStuck(fix);
     const sec = this.lastStep?.section;
     if (sec && res.used) {
       const st = this.sections.get(sec);
@@ -273,6 +328,70 @@ export class AutoRun {
   /** Where marker A should be now (mat cm), for the camera's search. */
   hint(): { x: number; y: number } | undefined {
     return this.state === 'running' ? this.est.markerA() : undefined;
+  }
+
+  /**
+   * Where the camera should look: around the estimate; when it hasn't seen
+   * the robot for a moment, also along the route from 20 cm before where it
+   * last saw it to just past the estimate (a robot that slips or gets stuck
+   * falls behind its estimate).
+   */
+  searchArea(now: number): TrackGate {
+    const center = this.est.markerA();
+    const radiusCm = Math.min(40, 15 + 2 * this.est.pose.sigmaCm);
+    if (now - this.lastFixT < 300) return { center, radiusCm, why: 'run' };
+    const from = this.seenS - 20, to = this.follower.progress + 10;
+    const a = this.settings.markerAheadCm;
+    const trail: { x: number; y: number }[] = [];
+    let last = -Infinity;
+    for (const p of this.plan.outline) {
+      if (p.s < from || p.s > to || p.s - last < 4) continue;
+      last = p.s;
+      const h = (p.headingDeg * Math.PI) / 180;
+      trail.push({ x: p.x + a * Math.cos(h), y: p.y + a * Math.sin(h) });
+    }
+    return { center, radiusCm, why: 'lost', trail, trailRadiusCm: 14 };
+  }
+
+  /** Under (or next to) the bridge, where the camera can't see the robot. */
+  private inBlindZone(): boolean {
+    const b = this.route.bridge;
+    if (!b) return false;
+    const p = this.est.pose, m = 12;
+    return p.x > b.x0 - m && p.x < b.x1 + m && p.y > b.y0 - m && p.y < b.y1 + m;
+  }
+
+  /** The camera sees the robot standing still while it is told to drive: stuck (on a cone?). */
+  private checkStuck(fix: CamFixIn): void {
+    const lim = this.settings.stuckStopMs;
+    const step = this.lastStep;
+    if (!lim || !step || step.kind !== 'path' || step.v < 10 || this.holdSince !== null) {
+      this.recent = [];
+      return;
+    }
+    this.recent.push({ t: fix.t, x: fix.x, y: fix.y });
+    while (this.recent.length > 2 && fix.t - this.recent[1].t >= lim) this.recent.shift();
+    const first = this.recent[0];
+    if (fix.t - first.t < lim) return;
+    let far = 0;
+    for (const q of this.recent) far = Math.max(far, Math.hypot(q.x - first.x, q.y - first.y));
+    if (far < 3) this.stop(`stuck: the camera saw it not moving for ${(lim / 1000).toFixed(1)} s (against a cone?)`);
+  }
+
+  /** The camera lost the robot: stand still and let it look; give up after lostStopMs. */
+  private hold(t: number, camAge: number): void {
+    const { logger } = this.deps;
+    if (this.holdSince === null) {
+      this.holdSince = t;
+      this.holds++;
+      this.recent = [];
+      logger.log('auto.lost', { s: r1(this.follower.progress), sec: this.lastStep?.section, camAgeMs: Math.round(camAge) });
+    }
+    this.send(0, 0, t);
+    this.est.setCommand(t, 0, 0);
+    if (t - this.holdSince > this.settings.lostStopMs) {
+      this.stop(`lost the robot: the camera hasn't seen it for ${(camAge / 1000).toFixed(1)} s`);
+    }
   }
 
   private onLine(code: number, t: number): void {
@@ -310,6 +429,22 @@ export class AutoRun {
     const t = clock.now();
     this.est.advance(t);
     const pose = this.est.pose;
+    // Lost by the camera (outside the bridge): hold still until it finds the robot again.
+    const unseen = t - this.lastFixT;
+    if (this.settings.cameraAssist && this.settings.lostPauseMs > 0) {
+      const allowed = this.settings.lostPauseMs + (this.inBlindZone() ? 3000 : 0);
+      if (unseen > allowed) {
+        this.hold(t, unseen);
+        if (this.state === 'running') {
+          logger.log('auto.tick', { s: r1(this.follower.progress), sec: this.lastStep?.section, kind: 'hold', x: r1(pose.x), y: r1(pose.y), cam: Math.round(unseen) });
+        }
+        return;
+      }
+      if (this.holdSince !== null) {
+        logger.log('auto.found', { s: r1(this.follower.progress), heldMs: Math.round(t - this.holdSince) });
+        this.holdSince = null;
+      }
+    }
     this.follower.nudgeK = t < this.nudge.until ? this.nudge.k : 0;
     const step = this.follower.step(t, pose);
     this.lastStep = step;
@@ -400,6 +535,7 @@ export class AutoRun {
       })),
       fixes: { total: this.est.stats.fixes, used: this.est.stats.used, rejected: this.est.stats.rejected, resets: this.est.stats.resets },
       lineEvents: this.lineEvents,
+      holds: this.holds,
       learned: { biasDegS: r1(pose.biasDegS), speedScale: Math.round(pose.speedScale * 100) / 100, turnScale: Math.round(pose.turnScale * 100) / 100 },
       spins: this.spinResults,
     };
@@ -413,7 +549,7 @@ export class AutoRun {
     return {
       running: this.state === 'running', t: t - this.t0, pose: this.est.pose, step: this.lastStep,
       lastFixAgeMs: t - this.lastFixT, progress: this.follower.progress, lengthCm: this.plan.lengthCm,
-      section: this.lastStep?.section ?? this.plan.legs[0]?.section ?? '', reason: this.summary?.reason,
+      section: this.lastStep?.section ?? this.plan.legs[0]?.section ?? '', reason: this.summary?.reason, holding: this.holdSince !== null,
     };
   }
 }
