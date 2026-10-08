@@ -77,6 +77,34 @@ result (`app` event `auto.blink`). `report.md` gets an "Auto runs" section, and 
 camera frame and a 1 cm/px top-down picture of the mat at its start and end into the session's
 images.
 
+## Race interface
+
+Data → Settings → Interface → **Race**: one full-screen view for the final run, in a pit-wall
+telemetry style (landscape). The camera with everything it draws (track fit, the route by section,
+the search area, the robot), the link/track/robot status, the lap time and best saved lap, a
+sector bar a–g that fills as the robot drives (with each sector's time after the lap), the setup
+to drive (a saved lap), and CONNECT → CAMERA → START / STOP. Nothing to adjust: the classic
+interface (≡ MENU → Classic interface) keeps every tool. Haptics on start lights, go, a recovery,
+losing the robot, the finish and STOP.
+
+**Saved laps.** After a finished lap, **★ Save lap** (race view, classic full screen, or the
+Saved laps card) keeps its time and everything that drove it: speed or lap tuning, turn style, cone
+dodges, lights. Tap one later to drive like it again, whatever was tried in between.
+
+## Lights
+
+- **Driving** (Drive tab, light show on): amber turn signals blink on the headlight of the side it
+  turns to, red brake lights on a slow-down, red when reversing, underglow by speed (teal → lime →
+  orange → pink) and, standing still, by the link's health (green, amber, red).
+- **Auto runs**: Formula 1 start lights (four red lights on the robot come on one by one, then all
+  out: go) and a colour show at the finish; during the run all four lights stay the marker colour
+  so the camera keeps the robot. Signals during the run are an experimental setting: the camera
+  then follows the underglow and the headlights signal, but in the simulator that made tracking
+  worse.
+- **Gamepad** (Drive tab): a Bluetooth or USB gamepad shows up as a mode: left stick (or the
+  triggers) drives, a stick steers, A sounds the horn, B stops; it rumbles when the line sensors
+  leave the lane.
+
 ## Lap tuning and the race engineer
 
 Instead of one speed for the whole lap, a **lap tuning** sets each section's speed on its

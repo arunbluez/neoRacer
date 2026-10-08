@@ -69,6 +69,7 @@ export class RobotLink {
   private _device?: DeviceInfo;
   private userDisconnect = false;
   private reconnecting = false;
+  private sentListeners = new Set<(cmd: string, t: number) => void>();
   private reconnectToken = 0;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private replyListeners = new Set<(e: ReplyEvent) => void>();
@@ -136,6 +137,12 @@ export class RobotLink {
     this.offTransport = [];
     this.transport = t;
     this.attach(t);
+  }
+
+  /** Every command as it goes out (packed writes: each command), with the send time. */
+  onSent(cb: (cmd: string, t: number) => void): () => void {
+    this.sentListeners.add(cb);
+    return () => this.sentListeners.delete(cb);
   }
 
   onReply(cb: (e: ReplyEvent) => void): () => void {
@@ -309,6 +316,7 @@ export class RobotLink {
     if (e.phase === 'sent') {
       for (const c of rec.cmds) {
         if (isQuery(c)) this.matcher.expect(c, rec.id, rec.tEnq, rec.tSent!, rec.replyTimeoutMs);
+        for (const l of this.sentListeners) l(c, rec.tSent!);
       }
       return;
     }

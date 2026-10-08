@@ -7,6 +7,11 @@
 // of each run.
 
 import { encodeImage } from '../../adapters/camera/imageIo';
+import { markerAheadFor } from '../../core/model/lightShow';
+import type { Rgb } from '../../core/protocol/commands';
+import { addSavedLap, applySavedLap, makeSavedLap } from '../../core/race/savedLaps';
+import type { SavedLap } from '../../core/settings';
+import { vibrate } from '../../adapters/device/device';
 import { AutoRun, trackingGate, type AutoSettings, type AutoSummary, type TrackGate } from '../../core/race/autoRun';
 import { buildPlan, RALLY_ROUTE, type Plan, type RouteSpec } from '../../core/race/route';
 import { PUGUZ_PROFILE } from '../../core/sim/robots';
@@ -32,6 +37,12 @@ class AutoController {
   /** The latest fix (kept for the start pose and the overlay). */
   latestFix?: CamFix;
   summary?: AutoSummary;
+  /** The settings the last run drove with (to save it as a lap). */
+  lastRunSettings?: AutoSettings;
+  /** Start lights: how many are lit (1–4), 0 = lights out, go; null = none showing. */
+  countdown: number | null = null;
+  /** The last finished lap has been saved (its id). */
+  savedId?: string;
   error?: string;
   /** Where the blink test found our robot. */
   identified: { x: number; y: number; t: number } | null = null;
@@ -149,6 +160,8 @@ class AutoController {
       this.latestFix = out.fix;
       this.trail.push({ x: out.fix.x, y: out.fix.y, t: out.fix.t });
       if (this.trail.length > 400) this.trail.splice(0, 100);
+      // While headlights signal (amber, red) the camera sees the light centre further back.
+      if (lab.lights.kind === 'auto') out.fix.aheadCm = markerAheadFor(lab.lights.markerHeadlightsAt(out.fix.t), this.settings.markerAheadCm);
       auto?.onFix(out.fix);
     }
     if (auto?.state === 'running') {
@@ -223,6 +236,7 @@ class AutoController {
     useApp.getState().bump();
     const t0 = clock.now();
     this.blink = new BlinkFinder(t0);
+    lab.lights.hold(BLINK_MS + 800, t0);
     const timers = BLINK_PATTERN.map((st) => setTimeout(() => {
       if (st.on) AutoRun.lightsOn(lab.link, this.settings);
       else AutoRun.lightsOff(lab.link);
@@ -268,6 +282,9 @@ class AutoController {
       }
       await sleep(300); // a few frames with the lights on again
     }
+    if (lab.settings.lights.show) await this.startLights();
+    this.lastRunSettings = this.settings;
+    this.savedId = undefined;
     const auto = lab.createAuto(this.settings);
     if (this.latestFix && clock.now() - this.latestFix.t < 600) auto.onFix(this.latestFix);
     useApp.getState().bump();
@@ -287,6 +304,100 @@ class AutoController {
     this.identified = null;
     void this.saveViews('end');
     useApp.getState().bump();
+    if (summary.finished) {
+      vibrate([60, 50, 60, 50, 220]);
+      if (lab.settings.lights.show) void this.celebrate();
+    } else vibrate(300);
+  }
+
+  /**
+   * Start lights, like Formula 1: four red lights come on one by one, then
+   * all out, and it goes. Then the marker colour again for the camera.
+   */
+  private async startLights(): Promise<void> {
+    const lab = getLab();
+    const send = (c: string) => void lab.link.send(c);
+    const red: Rgb = { r: 255, g: 0, b: 0 };
+    const rgb = (n: string, c: Rgb) => `${n},${c.r},${c.g},${c.b}`;
+    lab.lights.hold(3000, clock.now());
+    const stops = lab.stops;
+    const check = () => {
+      if (lab.stops !== stops || !lab.link.connected) {
+        this.countdown = null;
+        AutoRun.lightsOn(lab.link, this.settings);
+        useApp.getState().bump();
+        throw new Error('Stopped before the start.');
+      }
+    };
+    send('HO');
+    const steps = ['UGL', 'UGR', 'HLL', 'HLR'];
+    for (let i = 0; i < steps.length; i++) {
+      await sleep(420);
+      check();
+      send(rgb(steps[i], red));
+      this.countdown = i + 1;
+      vibrate(35);
+      useApp.getState().bump();
+    }
+    await sleep(500 + Math.random() * 300);
+    check();
+    send('HO');
+    this.countdown = 0;
+    vibrate(140);
+    useApp.getState().bump();
+    await sleep(120);
+    AutoRun.lightsOn(lab.link, this.settings);
+    // a few frames with the marker colour, so the start pose comes from the camera
+    await sleep(450);
+    this.countdown = null;
+  }
+
+  /** Finished: a short light show, then the marker colour again. */
+  private async celebrate(): Promise<void> {
+    const lab = getLab();
+    const send = (c: string) => void lab.link.send(c);
+    lab.lights.hold(2400, clock.now());
+    const colours: Rgb[] = [
+      { r: 255, g: 0, b: 140 }, { r: 255, g: 140, b: 0 }, { r: 210, g: 255, b: 0 }, { r: 0, g: 220, b: 160 }, { r: 0, g: 120, b: 255 }, { r: 170, g: 0, b: 255 },
+    ];
+    for (let i = 0; i < colours.length; i++) {
+      const c = colours[i];
+      send(`UG,${c.r},${c.g},${c.b}`);
+      send(i % 2 ? 'HL,255,255,255' : 'HL,0,0,0');
+      await sleep(260);
+    }
+    AutoRun.lightsOn(lab.link, this.settings);
+  }
+
+  /** Keep the last finished lap: its time and the settings that drove it. */
+  async saveLastLap(): Promise<SavedLap | null> {
+    const sum = this.summary, st = this.lastRunSettings;
+    if (!sum?.finished || !st) return null;
+    const lab = getLab();
+    const lap = makeSavedLap({ summary: sum, settings: st, robotId: lab.profile?.robotId, at: new Date() });
+    await lab.setSettings({ savedLaps: addSavedLap(lab.settings.savedLaps, lap) });
+    lab.logger.log('app', { event: 'lap.saved', detail: { id: lap.id, name: lap.name, lapMs: lap.lapMs } });
+    this.savedId = lap.id;
+    vibrate(60);
+    useApp.getState().bump();
+    return lap;
+  }
+
+  /** Drive like a saved lap from now on. */
+  async useSavedLap(id: string): Promise<void> {
+    const lab = getLab();
+    const lap = lab.settings.savedLaps.find((l) => l.id === id);
+    if (!lap) return;
+    await lab.setSettings({ auto: applySavedLap(lab.settings.auto, lap) });
+    lab.logger.log('app', { event: 'lap.used', detail: { id: lap.id, name: lap.name } });
+    this.reconfigure();
+    vibrate(30);
+    useApp.getState().bump();
+  }
+
+  async deleteSavedLap(id: string): Promise<void> {
+    const lab = getLab();
+    await lab.setSettings({ savedLaps: lab.settings.savedLaps.filter((l) => l.id !== id) });
   }
 
   /** Save the camera frame and a top-down picture of the mat into the session. */

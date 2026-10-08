@@ -105,7 +105,8 @@ export function DriveScreen() {
   const lab = getLab();
   const toast = useApp((s) => s.showToast);
   const d = lab.settings.drive;
-  const [mode, setMode] = useState<'stick' | 'tilt'>('stick');
+  const [mode, setMode] = useState<'stick' | 'tilt' | 'pad'>('stick');
+  const [padName, setPadName] = useState<string | null>(() => firstPad()?.id ?? null);
   const [cap, setCap] = useState(d.speedCap);
   const [expo, setExpo] = useState(d.expo);
   const [turnGain, setTurnGain] = useState(d.turnGain);
@@ -131,6 +132,34 @@ export function DriveScreen() {
     setTrimTable(lab.profile?.trimTable);
   }, [lab.profile?.trim, lab.profile?.trimTable]);
   const trimNow = trimAt({ trim, trimTable }, cap);
+
+  // The lights show the driving (turn signals, brake lights, underglow) while this screen is open.
+  useEffect(() => {
+    lab.driving = true;
+    return () => {
+      lab.driving = false;
+    };
+  }, [lab]);
+
+  // A Bluetooth/USB gamepad: offer it as soon as it is seen.
+  useEffect(() => {
+    const on = (e: GamepadEvent) => {
+      setPadName(e.gamepad.id);
+      setMode('pad');
+      vibrate(40);
+      toast(`Gamepad: ${e.gamepad.id.split('(')[0].trim()}`);
+    };
+    const off = () => {
+      setPadName(firstPad()?.id ?? null);
+      setMode((m) => (m === 'pad' ? 'stick' : m));
+    };
+    window.addEventListener('gamepadconnected', on);
+    window.addEventListener('gamepaddisconnected', off);
+    return () => {
+      window.removeEventListener('gamepadconnected', on);
+      window.removeEventListener('gamepaddisconnected', off);
+    };
+  }, [toast]);
 
   // Tilt sensor
   useEffect(() => {
@@ -167,13 +196,29 @@ export function DriveScreen() {
     const hz = lab.settings.drive.sendHz;
     const period = Math.max(lab.settings.minWriteGapMs, hz > 0 ? 1000 / hz : 0, 10);
     let wasActive = false;
+    let padButtons: boolean[] = [];
     const h = setInterval(() => {
       if (!lab.link.connected) return;
       const c = cfg.current;
       let x = 0;
       let y = 0;
       let active = false;
-      if (c.mode === 'stick') {
+      if (c.mode === 'pad') {
+        const pad = firstPad();
+        if (pad) {
+          ({ x, y, active } = padStick(pad));
+          // A: horn, B: stop. Rumble when the line sensors leave the lane.
+          const b = pad.buttons.map((bt) => bt.pressed);
+          if (b[0] && !padButtons[0]) void lab.link.send('HORN');
+          if (b[1] && !padButtons[1]) {
+            void lab.link.stop();
+            vibrate(120);
+          }
+          padButtons = b;
+          const ln = lab.link.latest.get('line');
+          if (ln?.reply.type === 'line' && ln.reply.code === 3 && performance.now() - ln.tRx < 150) rumble(pad);
+        }
+      } else if (c.mode === 'stick') {
         ({ x, y, active } = stick.current);
       } else if (c.tiltHeld && tilt.current && neutral.current) {
         ({ x, y } = tiltToStick(tilt.current.beta, tilt.current.gamma, neutral.current, lab.settings.drive.tiltMaxDeg));
@@ -215,6 +260,11 @@ export function DriveScreen() {
         <div className="row">
           <button className={`chip ${mode === 'stick' ? 'chip-on' : ''}`} onClick={() => setMode('stick')}>Stick</button>
           <button className={`chip ${mode === 'tilt' ? 'chip-on' : ''}`} onClick={() => { neutral.current = null; setMode('tilt'); }}>Tilt</button>
+          {padName && <button className={`chip ${mode === 'pad' ? 'chip-on' : ''}`} onClick={() => setMode('pad')}>Gamepad</button>}
+          <button
+            className={`chip ${lab.settings.lights.show ? 'chip-on' : ''}`}
+            onClick={() => void lab.setSettings({ lights: { ...lab.settings.lights, show: !lab.settings.lights.show } })}
+          >Lights</button>
           <button className={`chip ${overlay ? 'chip-on' : ''}`} onClick={() => setOverlay(!overlay)}>Line</button>
         </div>
         <div className="mono" style={{ fontSize: 15 }}>L {fmt(out.l)} · R {fmt(out.r)}</div>
@@ -230,7 +280,15 @@ export function DriveScreen() {
         </div>
       )}
 
-      {mode === 'stick' ? (
+      {mode === 'pad' ? (
+        <div className="card">
+          <p style={{ marginTop: 0 }}><b>{padName?.split('(')[0].trim() || 'Gamepad'}</b></p>
+          <p className="muted" style={{ margin: 0 }}>
+            Left stick: drive and steer (or right trigger to go, left trigger to back up, a stick to steer). A: horn. B: stop.
+            The pad rumbles when the line sensors leave the lane.
+          </p>
+        </div>
+      ) : mode === 'stick' ? (
         <Joystick onChange={(s) => (stick.current = s)} />
       ) : (
         <div className="card">
@@ -289,4 +347,28 @@ export function DriveScreen() {
       <LapTimer />
     </div>
   );
+}
+
+/** The first connected gamepad, if any. */
+function firstPad(): Gamepad | null {
+  try {
+    return (navigator.getGamepads?.() ?? []).find((g): g is Gamepad => !!g && g.connected) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stick position from a gamepad (standard mapping): triggers or the left stick drive, a stick steers. */
+function padStick(pad: Gamepad): { x: number; y: number; active: boolean } {
+  const dz = (v: number) => (Math.abs(v) < 0.12 ? 0 : v);
+  const ax = pad.axes;
+  const steer = Math.abs(dz(ax[2] ?? 0)) > Math.abs(dz(ax[0] ?? 0)) ? dz(ax[2] ?? 0) : dz(ax[0] ?? 0);
+  const rt = pad.buttons[7]?.value ?? 0, lt = pad.buttons[6]?.value ?? 0;
+  const y = rt > 0.05 || lt > 0.05 ? rt - lt : -dz(ax[1] ?? 0);
+  return { x: steer, y, active: steer !== 0 || Math.abs(y) > 0.05 };
+}
+
+function rumble(pad: Gamepad): void {
+  const act = (pad as Gamepad & { vibrationActuator?: { playEffect?: (t: string, p: object) => Promise<unknown> } }).vibrationActuator;
+  void act?.playEffect?.('dual-rumble', { duration: 120, strongMagnitude: 0.8, weakMagnitude: 0.4 })?.catch(() => {});
 }

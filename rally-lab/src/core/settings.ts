@@ -52,6 +52,25 @@ export type Settings = {
   auto: AutoSettings;
   /** Show the lab tools (Monitor, Console, Tests, Camera) in the tab bar. */
   labTools: boolean;
+  /**
+   * Turn signals, brake/reverse lights and underglow while driving, start lights and a finish
+   * show around auto runs (show); signals during auto runs too (inAuto, experimental).
+   */
+  lights: { show: boolean; inAuto: boolean };
+  /** Laps worth keeping: the settings that drove them, to drive them again. */
+  savedLaps: SavedLap[];
+  /** Interface: 'race' (the new full-screen race view) or 'classic' (tabs and all the tools). */
+  ui: 'race' | 'classic';
+};
+
+/** A lap worth keeping: its time, and the auto settings that drove it. */
+export type SavedLap = {
+  id: string;
+  name: string;
+  lapMs: number;
+  at: string;
+  robotId?: string;
+  auto: AutoSettings;
 };
 
 export const DEFAULT_POLLER_PRESETS: PollerPreset[] = [
@@ -91,6 +110,10 @@ export const DEFAULT_SETTINGS: Settings = {
   drive: { speedCap: 50, expo: 0.3, turnGain: 0.5, deadzone: 0.06, useDeadband: true, sendHz: 0, tiltMaxDeg: 30, lineOverlay: true },
   auto: DEFAULT_AUTO_SETTINGS,
   labTools: false,
+  // Signals during auto runs are experimental: headlights changing colour move the light centre the camera tracks.
+  lights: { show: true, inAuto: false },
+  savedLaps: [],
+  ui: 'classic',
 };
 
 /** Fill in fields missing from older stored settings. */
@@ -99,6 +122,8 @@ export function withDefaults(s: Partial<Settings> | undefined): Settings {
     ...DEFAULT_SETTINGS,
     ...(s ?? {}),
     drive: { ...DEFAULT_SETTINGS.drive, ...(s?.drive ?? {}) },
+    lights: { ...DEFAULT_SETTINGS.lights, ...(s?.lights ?? {}) },
+    savedLaps: Array.isArray(s?.savedLaps) ? s.savedLaps : [],
     // Version 2 made arc turns the default; settings saved before that switch over once.
     auto: migrateAuto(s?.auto),
     markerA: { ...DEFAULT_SETTINGS.markerA, ...(s?.markerA ?? {}) },

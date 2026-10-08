@@ -220,3 +220,19 @@
   engineer, Load/Paste plan, Copy brief for the Claude app, review before Apply, Undo, Keep for
   the race). The speed slider gives way to the tuning while one is set.
 - Run summary: tuning, predicted time, line events per section.
+
+## Race interface, lights, saved laps (2026-10-08)
+
+- Race interface (Data → Settings → Interface): a full-screen pit-wall view for the final run —
+  camera with all its drawings, status, lap time, sector bar with splits, saved-lap setup,
+  CONNECT / CAMERA / START / STOP, start lights and GO on the picture, haptics. Michroma and Azeret
+  Mono, self-hosted and precached.
+- Saved laps: keep a good lap's settings with its time; use it again any time.
+- Light show (`model/lightShow.ts`): turn signals, brake and reverse lights, underglow by speed and
+  link health while driving; start lights and a finish show around auto runs; signals during auto
+  runs experimental (off). The run says what it is doing (`lightIntent`) so the lights don't follow
+  every steering correction; the camera's light centre moves with the headlights in use.
+- Gamepad driving with horn, stop and rumble.
+- Fix: picking the route up again after a recovery could choose the zigzag's neighbouring lane
+  (25 cm away); it now favours points near where the robot was along the route.
+

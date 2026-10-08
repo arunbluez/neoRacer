@@ -132,6 +132,11 @@ export function AutoScreen() {
         </div>
         <button className="btn runview-close" onClick={exitFull} disabled={running} aria-label="Close full screen">✕ Close</button>
         <div className="runview-actions">
+          {!running && ac.summary?.finished && (
+            <button className="btn runview-mid runview-save" disabled={!!ac.savedId} onClick={() => void ac.saveLastLap().then((l) => l && toast(`Saved: ${l.name}`))}>
+              {ac.savedId ? '★ Saved' : `★ Save lap ${(ac.summary.timeMs / 1000).toFixed(1)} s`}
+            </button>
+          )}
           {!running && <button className="btn runview-mid" onClick={() => void findRobot()} disabled={!lab.link.connected || ac.blinking}>{ac.blinking ? 'Blinking…' : 'Find my robot'}</button>}
           {!running && <button className="btn runview-mid" onClick={() => ac.redetect()}>Re-detect track</button>}
           {running ? (
@@ -288,6 +293,8 @@ export function AutoScreen() {
 
       {ac.summary && <Summary />}
 
+      <SavedLaps disabled={running} />
+
       <LapTuning disabled={running} />
 
       <div className="row" style={{ gap: 6, margin: '8px 0' }}>
@@ -390,6 +397,37 @@ function ConeDodges({ route, disabled, onChange }: { route: RouteSpec; disabled:
         The route line on the live picture moves as you slide: put it where the robot clears the cones (it is ~10 cm wide).
         Left/right as the robot drives. Keep within ±6 cm so the robot stays on the lane.
       </small>
+    </div>
+  );
+}
+
+/** Laps worth keeping: tap one to drive like it again. */
+function SavedLaps({ disabled }: { disabled: boolean }) {
+  const lab = getLab();
+  const toast = useApp((x) => x.showToast);
+  const laps = lab.settings.savedLaps;
+  const canSave = ac.summary?.finished && !ac.savedId;
+  if (!laps.length && !canSave) return null;
+  return (
+    <div className="card">
+      <div className="row-between">
+        <b>Saved laps</b>
+        {canSave && (
+          <button className="btn btn-small btn-primary" onClick={() => void ac.saveLastLap().then((l) => l && toast(`Saved: ${l.name}`))}>
+            ★ Save this lap ({(ac.summary!.timeMs / 1000).toFixed(1)} s)
+          </button>
+        )}
+      </div>
+      {laps.map((l) => (
+        <div className="row-between" key={l.id} style={{ marginTop: 6 }}>
+          <span className="mono">{l.name}{l.robotId && lab.profile?.robotId && l.robotId !== lab.profile.robotId ? ` (${l.robotId})` : ''}</span>
+          <span className="row" style={{ gap: 6 }}>
+            <button className="btn btn-small" disabled={disabled} onClick={() => void ac.useSavedLap(l.id).then(() => toast(`Driving like ${l.name}`))}>Use</button>
+            <button className="btn btn-small" disabled={disabled} onClick={() => void ac.deleteSavedLap(l.id)}>✕</button>
+          </span>
+        </div>
+      ))}
+      <small className="hint">A saved lap keeps everything that drove it: speed or lap tuning, turn style, cone dodges, lights. Use one to go back to it after trying things.</small>
     </div>
   );
 }

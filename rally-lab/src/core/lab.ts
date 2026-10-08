@@ -12,7 +12,9 @@ import { ALL_TESTS } from './tests/registry';
 import { Poller } from './link/poller';
 import { Logger } from './log/logger';
 import { makeSessionId, robotIdFromName, SCHEMA_VERSION, type SessionHeader } from './log/session';
+import { LightShow, type LightMode } from './model/lightShow';
 import { newProfile, type RobotProfile } from './model/profile';
+import { applyMotor, MOTOR_COMMANDS, type MotorState } from './protocol/commands';
 import { withDefaults, type Settings } from './settings';
 import type { CameraControl, PoseSource } from './tests/camera';
 import { TestRunner } from './tests/runner';
@@ -63,6 +65,13 @@ export class Lab {
   calibration?: TrackCalibration;
   /** The current (or last) camera-assisted auto run. */
   auto?: AutoRun;
+  /** Turn signals, brake lights and underglow (see model/lightShow). */
+  readonly lights: LightShow;
+  /** The Drive screen is open: the lights show manual driving. */
+  driving = false;
+  /** Counts STOPs (a start countdown gives up when one comes). */
+  stops = 0;
+  private motorSent: MotorState = { l: 0, r: 0 };
   private listeners = new Set<Listener>();
   private real?: Transport;
   private mock?: Transport;
@@ -93,6 +102,34 @@ export class Lab {
       if (s === 'connected' && info?.device) void this.onConnected(info.device);
       this.emit();
     });
+    this.lights = new LightShow((c) => void this.link.send(c));
+    this.link.onSent((c, t) => {
+      const name = c.split(',')[0];
+      if (!MOTOR_COMMANDS.includes(name) && c !== 'S') return;
+      this.motorSent = applyMotor(c, this.motorSent);
+      this.lights.setMotor(this.motorSent.l, this.motorSent.r, t);
+    });
+    setInterval(() => this.tickLights(), 60);
+  }
+
+  /** Which light show fits what the app is doing now. */
+  private lightMode(): LightMode {
+    const l = this.settings.lights;
+    if (!this.link.connected || !l.show || this.runner.running) return { kind: 'off' };
+    if (this.auto?.state === 'running') return l.inAuto ? { kind: 'auto', marker: this.settings.auto.lightColor } : { kind: 'off' };
+    return this.driving ? { kind: 'drive' } : { kind: 'off' };
+  }
+
+  private tickLights(): void {
+    const now = this.deps.clock.now();
+    const was = this.lights.kind;
+    const mode = this.lightMode();
+    this.lights.setMode(mode, now);
+    // After a run or driving: back to the marker colour, so the camera can find the robot again.
+    if (was !== 'off' && mode.kind === 'off' && this.link.connected) AutoRun.lightsOn(this.link, this.settings.auto);
+    this.lights.rttMs = this.link.snapshot().rttMed ?? null;
+    if (this.auto?.state === 'running') this.lights.intent = this.auto.lightIntent();
+    this.lights.tick(now);
   }
 
   static async create(deps: LabDeps): Promise<Lab> {
@@ -235,6 +272,7 @@ export class Lab {
 
   /** STOP: stop the motors, abort any test or auto run. */
   stopAll(reason = 'STOP'): void {
+    this.stops++;
     void this.link.stop();
     this.auto?.stop(reason);
     if (this.runner.running) this.runner.abort(reason);

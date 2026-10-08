@@ -9,7 +9,7 @@ import type { HandheldFrame } from '../../core/vision/handheld';
 import { useAnimationFrame } from '../hooks';
 import { dot, polyline } from '../camera/views';
 
-const SECTION_COLORS = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#b388ff', '#f78c6b', '#9be564'];
+export const SECTION_COLORS = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#b388ff', '#f78c6b', '#9be564'];
 
 /** Overlay on the live picture (frame pixels × scale). */
 export function drawLiveOverlay(

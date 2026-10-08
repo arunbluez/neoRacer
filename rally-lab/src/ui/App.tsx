@@ -10,9 +10,14 @@ import { AutoScreen } from './screens/AutoScreen';
 import { DriveScreen } from './screens/DriveScreen';
 import { MonitorScreen } from './screens/MonitorScreen';
 import { TestsScreen } from './screens/TestsScreen';
+import { RaceApp } from './racemode/RaceApp';
+import { useLabVersion } from './hooks';
+import { getLab } from './lab';
 
 export function App() {
   const tab = useApp((s) => s.tab);
+  useLabVersion();
+  if (getLab().settings.ui === 'race') return <RaceApp />;
   return (
     <div className="app">
       <Header />

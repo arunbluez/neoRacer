@@ -253,7 +253,7 @@ export class PoseEstimator {
   }
 
   /** Fold in a camera fix of marker A taken at fix.t. */
-  addFix(fix: { t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number }): FixResult {
+  addFix(fix: { t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number; aheadCm?: number }): FixResult {
     this.stats.fixes++;
     if (fix.t > this.t) this.advance(fix.t);
     const now = this.t;
@@ -300,8 +300,9 @@ export class PoseEstimator {
     return res;
   }
 
-  private update(fix: { x: number; y: number; headingDeg: number | null; cmPerPx: number }): FixResult {
-    const d = this.opts.markerAheadCm;
+  private update(fix: { x: number; y: number; headingDeg: number | null; cmPerPx: number; aheadCm?: number }): FixResult {
+    // Where the seen light centre is, ahead of the axle (it moves back when headlights signal in another colour).
+    const d = fix.aheadCm ?? this.opts.markerAheadCm;
     const [x, y, th] = this.s;
     const cos = Math.cos(th), sin = Math.sin(th);
     const zx = fix.x - (x + d * cos), zy = fix.y - (y + d * sin);
