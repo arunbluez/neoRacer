@@ -62,7 +62,8 @@ export const RALLY_ROUTE: RouteSpec = {
     {
       id: 'c',
       note: 'long straight: bridge, then cones on the right, then on the left',
-      parts: [S(195.6, [{ from: 37, to: 71, offsetCm: -2.5 }, { from: 88, to: 121, offsetCm: 3.5 }]), L(90, 26.5)],
+      // Cones at 42 and 61 cm (right) and 93 and 111 cm (left): pass them 4.5 cm off the centre line.
+      parts: [S(195.6, [{ from: 30, to: 70, offsetCm: -4.5 }, { from: 86, to: 124, offsetCm: 4.5 }]), L(90, 26.5)],
     },
     { id: 'd', note: 'far straight, hairpin into the zigzag', parts: [S(62.45), L(180, 13.75)] },
     { id: 'e', note: 'zigzag, short legs', parts: [S(17.5), R(180, 12.75), S(18.25), L(180, 12.75)] },
@@ -121,8 +122,14 @@ export function wrapDeg(a: number): number {
   return r + 0;
 }
 
-/** Cosine-ramped sideways offset along a straight (ramps of `rampCm` outside each range). */
-export function offsetAt(offsets: OffsetRange[] | undefined, d: number, rampCm = 15): number {
+/**
+ * Cosine-ramped sideways offset along a straight (ramps of `rampCm` outside
+ * each range). 25 cm keeps the swap from one side to the other between the
+ * cones of section c a gentle bend (~22 cm radius): with 15 cm ramps it was
+ * as sharp as a 5–8 cm radius turn, which the robot can only drive by
+ * speeding up to keep its inner wheel turning.
+ */
+export function offsetAt(offsets: OffsetRange[] | undefined, d: number, rampCm = 25): number {
   if (!offsets) return 0;
   let o = 0;
   for (const r of offsets) {
@@ -135,6 +142,19 @@ export function offsetAt(offsets: OffsetRange[] | undefined, d: number, rampCm =
     o += w * r.offsetCm;
   }
   return o;
+}
+
+/** A copy of the route with one offset range's sideways shift changed (the cone dodges). */
+export function withOffset(spec: RouteSpec, section: string, part: number, range: number, offsetCm: number): RouteSpec {
+  return {
+    ...spec,
+    sections: spec.sections.map((sec) => (sec.id !== section ? sec : {
+      ...sec,
+      parts: sec.parts.map((p, i) => (i !== part || p.kind !== 'straight' || !p.offsets ? p : {
+        ...p, offsets: p.offsets.map((o, k) => (k === range ? { ...o, offsetCm } : o)),
+      })),
+    })),
+  };
 }
 
 /** Validates a spec; returns problems (empty when fine). */

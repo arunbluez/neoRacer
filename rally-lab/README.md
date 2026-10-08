@@ -34,6 +34,16 @@ both black (off the lane) stops the run.
 5. After the run: the summary shows the time and how far off the route each section was. Export
    the logs (**Export logs**) and send them over: the route and the tuning get corrected from them.
 
+If the camera loses the robot (outside the bridge) for a second, the robot **holds still** and the
+camera looks along the route back to where it last saw it (an orange strip on the picture); found,
+it carries on from there, with the route's heading. A robot that slipped or pushed against a cone
+falls behind its estimate, and before this the estimate drove on and the camera looked in the wrong
+place. Not found within 8 s: the run stops. If the camera sees the robot standing still while it's
+driven for 1.5 s, the run stops as **stuck**.
+
+The **Cone dodges** card moves the route sideways around the cones on c (they get moved from day to
+day): watch the route line on the live picture and slide it clear of them. The robot is ~10 cm wide.
+
 What the app does each frame: marks the lane-coloured pixels (blue → purple → pink), and fits the
 known lane to their edges (a robust homography fit that only matches an edge with the lane on the
 correct side); while tracking it starts from the last frame's fit, otherwise from the lane band's

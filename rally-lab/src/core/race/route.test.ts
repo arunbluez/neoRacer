@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPlan, checkRoute, closureError, offsetAt, RALLY_ROUTE, totalTurnDeg, wrapDeg, type RouteSpec } from './route';
+import { buildPlan, checkRoute, closureError, offsetAt, RALLY_ROUTE, totalTurnDeg, withOffset, wrapDeg, type RouteSpec } from './route';
 
 describe('route', () => {
   it('the measured track is a closed lap that turns once to the left', () => {
@@ -15,7 +15,7 @@ describe('route', () => {
     expect(plan.lengthCm).toBeLessThan(850);
     const xs = plan.outline.map((p) => p.x), ys = plan.outline.map((p) => p.y);
     expect(Math.min(...xs)).toBeCloseTo(48.5, 0);
-    expect(Math.max(...xs)).toBeCloseTo(151.2 + 3.5, 0); // the right side, shifted around the left-hand cones
+    expect(Math.max(...xs)).toBeCloseTo(151.2 + 4.5, 0); // the right side, shifted around the left-hand cones
     expect(Math.min(...ys)).toBeCloseTo(25, 0);
     expect(Math.max(...ys)).toBeCloseTo(276.1, 0);
     // every section is visited in order
@@ -28,9 +28,9 @@ describe('route', () => {
     const c = plan.outline.filter((p) => p.section === 'c' && Math.abs(p.curv) < 0.02);
     const at = (y: number) => c.reduce((best, p) => (Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best));
     // driving up (−y): right of travel is +x
-    expect(at(195).x).toBeCloseTo(151.2 - 2.5, 1); // right-hand cones: keep left
-    expect(at(145).x).toBeCloseTo(151.2 + 3.5, 1); // left-hand cones: keep right
-    expect(at(235).x).toBeCloseTo(151.2, 1);
+    expect(at(195).x).toBeCloseTo(151.2 - 4.5, 1); // right-hand cones: keep left
+    expect(at(145).x).toBeCloseTo(151.2 + 4.5, 1); // left-hand cones: keep right
+    expect(at(244).x).toBeCloseTo(151.2, 1); // the start of c, before the dodge ramps in
   });
 
   it('spin style turns on the spot where the straights meet', () => {
@@ -65,9 +65,17 @@ describe('route', () => {
   it('ramps offsets in and out smoothly', () => {
     const r = [{ from: 10, to: 20, offsetCm: 4 }];
     expect(offsetAt(r, 15)).toBe(4);
-    expect(offsetAt(r, 0)).toBeCloseTo(0.5 * (1 + Math.cos(Math.PI * 10 / 15)) * 4, 6);
-    expect(offsetAt(r, -10)).toBe(0);
-    expect(offsetAt(r, 40)).toBe(0);
+    expect(offsetAt(r, 0)).toBeCloseTo(0.5 * (1 + Math.cos(Math.PI * 10 / 25)) * 4, 6);
+    expect(offsetAt(r, -20)).toBe(0);
+    expect(offsetAt(r, 50)).toBe(0);
+    // The swap between the cones of section c is a gentle bend (radius > 15 cm), not a corner.
+    const c = buildPlan(RALLY_ROUTE, 'arc').outline.filter((p) => p.section === 'c' && Math.abs(p.curv) < 1 / 26);
+    expect(Math.max(...c.map((p) => Math.abs(p.curv)))).toBeLessThan(1 / 15);
+    // Changing one dodge leaves the rest alone.
+    const w = withOffset(RALLY_ROUTE, 'c', 0, 1, 6);
+    const off = (w.sections[2].parts[0] as { offsets: { offsetCm: number }[] }).offsets;
+    expect(off.map((o) => o.offsetCm)).toEqual([-4.5, 6]);
+    expect(RALLY_ROUTE.sections[2].parts[0]).not.toBe(w.sections[2].parts[0]);
   });
 
   it('flags broken specs', () => {
