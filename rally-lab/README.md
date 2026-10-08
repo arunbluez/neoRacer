@@ -87,9 +87,21 @@ to drive (a saved lap), and CONNECT → CAMERA → START / STOP. Nothing to adju
 interface (≡ MENU → Classic interface) keeps every tool. Haptics on start lights, go, a recovery,
 losing the robot, the finish and STOP.
 
-**Saved laps.** After a finished lap, **★ Save lap** (race view, classic full screen, or the
+**Saved laps.** After a finished lap, **★ Save** (race view, classic full screen, or the
 Saved laps card) keeps its time and everything that drove it: speed or lap tuning, turn style, cone
 dodges, lights. Tap one later to drive like it again, whatever was tried in between.
+
+**↺ Reset** after a run (stopped, finished or failed): motors off, the lap time, sectors and trails
+cleared, the lights back in the marker colour, and the camera looks for the robot at the start
+again. Put the robot on the start line, then START.
+
+**Race engineer in two taps.** **⧉ Copy logs** copies the brief (the last four runs, the knobs and
+their limits, the answer's shape) to paste into the Claude app. Copy Claude's whole answer, then
+**⇣ Paste plan**: the plan is read from the clipboard, checked against the tuning in use (missing
+numbers kept, raises capped at 25 % a lap) and used straight away; the toast shows the predicted
+lap, and the setup panel the tuning's name and prediction. Track edits in a plan are left out here
+(review them in the classic Lap tuning card). ≡ MENU → **Undo plan** goes back one step. If the
+browser won't let the app read the clipboard, a box opens to paste into.
 
 ## Lights
 

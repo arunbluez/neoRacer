@@ -236,3 +236,14 @@
 - Fix: picking the route up again after a recovery could choose the zigzag's neighbouring lane
   (25 cm away); it now favours points near where the robot was along the route.
 
+## Race view: reset and the engineer in two taps (2026-10-08)
+
+- ↺ Reset after a run: motors off, result, sectors and trails cleared, lights back to the marker
+  colour, the camera looking for the robot at the start.
+- ⧉ Copy logs (the engineer brief for the Claude app) and ⇣ Paste plan (reads the clipboard, checks
+  the plan and uses it straight away; tuning only, track edits stay for the classic review; a paste
+  box when the clipboard can't be read). Undo plan in the menu; the setup panel shows the
+  predicted lap.
+- The plan steps shared by the Lap tuning card and the race view live in `ui/race/engineerFlow.ts`.
+- Layout: the stop reason sits on the camera tag; Save shares a row with Reset after a finished
+  lap; tighter side column on short (360–390 px) landscape phones.

@@ -156,6 +156,7 @@
 .rx-state.run { color: var(--rx-lime); border-color: var(--rx-lime); }
 .rx-state.warn { color: var(--rx-amber); border-color: var(--rx-amber); }
 .rx-state.bad { color: var(--rx-red); border-color: var(--rx-red); }
+.rx-cam-tag .rx-why { color: var(--rx-red); max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rx-empty {
   border: 1px dashed var(--rx-line-strong);
   aspect-ratio: 4 / 3;
@@ -220,7 +221,6 @@
 .rx-time.fail { color: var(--rx-faint); }
 .rx-sub { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--rx-dim); }
 .rx-sub b { color: var(--rx-text); font-weight: 400; }
-.rx-reason { font-size: 11px; color: var(--rx-red); margin-top: 6px; line-height: 1.35; }
 .rx-rule { height: 1px; background: var(--rx-line); }
 .rx-setup {
   width: 100%;
@@ -233,6 +233,8 @@
   gap: 4px;
   font-family: var(--rx-num);
 }
+.rx-setup .rx-label { display: flex; justify-content: space-between; align-items: baseline; }
+.rx-setup .rx-label em { font-family: var(--rx-num); font-style: normal; font-size: 10px; letter-spacing: 0.04em; text-transform: none; color: var(--rx-dim); }
 .rx-setup .rx-v { font-size: 13px; display: flex; justify-content: space-between; }
 .rx-setup .rx-v i { font-style: normal; color: var(--rx-lime); }
 .rx-actions { margin-top: auto; display: grid; gap: 8px; }
@@ -247,11 +249,26 @@
   color: var(--rx-text);
   border: 1px solid var(--rx-line-strong);
   cursor: pointer;
+  white-space: nowrap;
+  padding: 0 6px;
   transition: background 120ms, transform 80ms;
 }
 .rx-btn:active { transform: scale(0.98); background: rgba(255, 255, 255, 0.06); }
 .rx-btn:disabled { opacity: 0.35; }
 .rx-btn.lime { color: var(--rx-lime); border-color: var(--rx-lime); }
+.rx-btn.sm { min-height: 36px; font-size: 9px; letter-spacing: 0.16em; color: var(--rx-dim); }
+.rx-btn.sm:not(:disabled):active { color: var(--rx-lime); border-color: var(--rx-lime); }
+.rx-paste {
+  min-height: 160px;
+  resize: vertical;
+  background: var(--rx-panel);
+  border: 1px solid var(--rx-line-strong);
+  color: var(--rx-text);
+  font-family: var(--rx-num);
+  font-size: 11px;
+  padding: 10px;
+}
+.rx-paste:focus { outline: none; border-color: var(--rx-lime); }
 .rx-go-btn, .rx-stop-btn {
   font-family: var(--rx-label);
   letter-spacing: 0.34em;
@@ -331,6 +348,24 @@
 .rx-in.d3 { animation-delay: 220ms; }
 .rx-in.d4 { animation-delay: 300ms; }
 .rx-flash { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, transparent 30%, rgba(200, 255, 46, 0.35) 50%, transparent 70%); animation: rx-flash 900ms ease-out forwards; }
+
+/* narrower phones: labels on one line */
+@media (max-width: 860px) {
+  .rx-btn { letter-spacing: 0.12em; }
+  .rx-btn.sm { letter-spacing: 0.08em; }
+}
+
+/* short landscape phones (360–390 px tall): tighter side column */
+@media (orientation: landscape) and (max-height: 395px) {
+  .rx-side { gap: 7px; }
+  .rx-time { font-size: clamp(36px, 5.4vw, 52px); margin-top: 3px; }
+  .rx-sub { margin-top: 5px; }
+  .rx-setup { padding: 6px 10px; gap: 2px; }
+  .rx-btn { min-height: 38px; }
+  .rx-btn.sm { min-height: 32px; }
+  .rx-go-btn { min-height: 58px; font-size: 16px; }
+  .rx-stop-btn { min-height: 80px; }
+}
 
 .rx-rotate { display: none; }
 @media (orientation: portrait) {

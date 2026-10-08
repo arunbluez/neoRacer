@@ -7,33 +7,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { copyText, shareOrDownload } from '../../adapters/export/share';
-import { engineerBriefText, engineerContext } from '../../core/race/engineerBrief';
-import { checkPlan, parsePlan, type RouteEdit } from '../../core/race/engineerPlan';
 import type { RunAnalysis } from '../../core/race/lapAnalysis';
 import { quickTune } from '../../core/race/learner';
-import { motorModel } from '../../core/race/motor';
-import type { RouteSpec } from '../../core/race/route';
-import { buildSpeedProfile, effectiveTuning } from '../../core/race/speedProfile';
-import { constantTuning, tuningDiff, type Tuning, type TuningChange } from '../../core/race/tuning';
+import { constantTuning, tuningDiff } from '../../core/race/tuning';
 import { errorMessage } from '../../core/util/async';
 import { useApp } from '../appStore';
 import { getLab } from '../lab';
 import { autoController as ac } from './autoController';
-
-type Review = {
-  title: string;
-  summary?: string;
-  tuning: Tuning;
-  diff: TuningChange[];
-  notes: string[];
-  watch: string[];
-  warnings: string[];
-  predictedS: number;
-  route?: RouteSpec;
-  routeApplied: RouteEdit[];
-  routeRejected: { edit: RouteEdit; why: string }[];
-  closure?: { before: number; after: number };
-};
+import { applyTuning, briefText, reviewPlan, tuningInUse, undoTuning, type PlanReview as Review } from './engineerFlow';
 
 const s1 = (ms: number) => (ms / 1000).toFixed(1);
 
@@ -41,13 +22,7 @@ export function LapTuning({ disabled }: { disabled: boolean }) {
   const lab = getLab();
   const toast = useApp((x) => x.showToast);
   const s = lab.settings.auto;
-  const route = ac.route;
-  const ids = useMemo(() => route.sections.map((x) => x.id), [route]);
-  const plan = ac.plan();
-  const model = useMemo(() => motorModel(lab.profile), [lab.profile]);
-  const base = useMemo(() => s.tuning ?? constantTuning(s, ids), [s, ids]);
-  const profile = useMemo(() => buildSpeedProfile(plan, base, model, s), [plan, base, model, s]);
-  const current = useMemo(() => effectiveTuning({ ...base, settleCm: base.settleCm ?? s.settleCm }, profile), [base, s.settleCm, profile]);
+  const { ids, base, profile, current, predictOf } = useMemo(() => tuningInUse(s, lab.profile), [s, lab.profile]);
   const [runs, setRuns] = useState<RunAnalysis[]>([]);
   const [review, setReview] = useState<Review | null>(null);
   const [withRoute, setWithRoute] = useState(false);
@@ -59,8 +34,6 @@ export function LapTuning({ disabled }: { disabled: boolean }) {
   useEffect(() => {
     void lab.autoRunAnalyses().then(setRuns).catch(() => setRuns([]));
   }, [lab, lastSummary]);
-
-  const predictOf = (t: Tuning) => buildSpeedProfile(plan, t, model, s).predictedS;
 
   const quick = () => {
     const last = runs[runs.length - 1];
@@ -77,46 +50,22 @@ export function LapTuning({ disabled }: { disabled: boolean }) {
   };
 
   const loadPlan = (text: string) => {
-    const { plan: p, errors } = parsePlan(text);
-    if (!p) return toast(errors[0] ?? 'No plan found', 'error');
-    const label = p.tuning.label.startsWith('engineer') ? p.tuning.label : `engineer ${new Date().toTimeString().slice(0, 5)}`;
-    const c = checkPlan(p, { current, route, style: s.style, label });
+    const { review: r, error } = reviewPlan(text);
+    if (!r) return toast(error ?? 'No plan found', 'error');
     setWithRoute(false);
     setPaste(null);
-    setReview({
-      title: `${label}${p.model ? ` (${p.model})` : p.engine === 'quick' ? ' (quick tune)' : ''}`,
-      summary: p.summary,
-      tuning: c.tuning,
-      diff: tuningDiff(current, c.tuning),
-      notes: p.changes.map((x) => `${x.what.replace(/[.:]+$/, '')} — ${x.why}`),
-      watch: p.watch,
-      warnings: [
-        ...(p.basedOn.tuning && p.basedOn.tuning !== base.label ? [`This plan was made after runs with "${p.basedOn.tuning}"; the tuning in use is "${base.label}". Its numbers are checked against the one in use.`] : []),
-        ...c.warnings,
-      ],
-      predictedS: predictOf(c.tuning),
-      route: c.route,
-      routeApplied: c.routeApplied,
-      routeRejected: c.routeRejected,
-      closure: c.closure,
-    });
+    setReview(r);
   };
 
   const apply = async (r: Review) => {
-    const a = lab.settings.auto;
-    const t: Tuning = { ...r.tuning, createdAt: new Date().toISOString() };
-    const newRoute = withRoute && r.route ? r.route : a.route;
-    await lab.setSettings({ auto: { ...a, tuning: t, tuningPrev: a.tuning ?? constantTuning(a, ids), route: newRoute } });
-    if (newRoute !== a.route) ac.reconfigure();
+    await applyTuning(r.tuning, withRoute ? r.route : undefined);
     setReview(null);
-    toast(`Tuning "${t.label}" set: predicted lap ${r.predictedS} s`);
+    toast(`Tuning "${r.tuning.label}" set: predicted lap ${r.predictedS} s`);
   };
 
   const undo = async () => {
-    const a = lab.settings.auto;
-    if (!a.tuningPrev) return;
-    const back = a.tuningPrev.source === 'constant' ? undefined : a.tuningPrev;
-    await lab.setSettings({ auto: { ...a, tuning: back, tuningPrev: a.tuning } });
+    if (!s.tuningPrev) return;
+    const back = await undoTuning();
     toast(`Back to "${back?.label ?? 'constant speed'}"`);
   };
 
@@ -150,7 +99,7 @@ export function LapTuning({ disabled }: { disabled: boolean }) {
   const copyBrief = async () => {
     if (!runs.length) return toast('Drive a lap first.', 'error');
     try {
-      const ok = await copyText(engineerBriefText(engineerContext(runs.slice(-4))));
+      const ok = await copyText(briefText(runs));
       toast(ok ? 'Brief copied: paste it into the Claude app, then paste its answer here (Paste plan).' : 'Copy failed', ok ? 'info' : 'error');
     } catch (err) {
       toast(errorMessage(err), 'error');

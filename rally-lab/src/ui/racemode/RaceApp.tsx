@@ -1,11 +1,15 @@
 // The race interface: one full-screen view for the final run. The camera
 // with everything it draws (track fit, route by section, the robot, the
 // search area), the link/track/robot status, the lap time, a sector bar a–g,
-// the setup to drive (a saved lap), and START / STOP. Nothing to adjust:
-// that's the classic interface's job (Data → Settings → Interface).
+// the setup to drive (a saved lap), START / STOP and RESET, and the race
+// engineer in two taps (copy the logs for the Claude app, paste its answer:
+// the plan is checked and used straight away). Nothing to adjust: that's the
+// classic interface's job (Data → Settings → Interface).
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { vibrate } from '../../adapters/device/device';
+import { copyText } from '../../adapters/export/share';
+import type { RunAnalysis } from '../../core/race/lapAnalysis';
 import { errorMessage } from '../../core/util/async';
 import { snapshotAuto } from '../../core/race/savedLaps';
 import { useApp } from '../appStore';
@@ -15,6 +19,7 @@ import { BannerLayer, PromptLayer, Toast } from '../components/PromptLayer';
 import { useLabVersion, useTicker } from '../hooks';
 import { getLab } from '../lab';
 import { autoController as ac } from '../race/autoController';
+import { applyTuning, briefText, reviewPlan, tuningInUse, undoTuning } from '../race/engineerFlow';
 import { drawLiveOverlay, SECTION_COLORS } from '../race/views';
 import './race.css';
 
@@ -34,7 +39,9 @@ export function RaceApp() {
   const lab = getLab();
   const toast = useApp((s) => s.showToast);
   const [busy, setBusy] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'laps' | 'menu' | null>(null);
+  const [sheet, setSheet] = useState<'laps' | 'menu' | 'paste' | null>(null);
+  const [pasteText, setPasteText] = useState('');
+  const [runs, setRuns] = useState<RunAnalysis[]>([]);
   const [flash, setFlash] = useState(0);
   const camCell = useRef<HTMLDivElement>(null);
   const prev = useRef<{ recovering?: string; holding: boolean; summary?: unknown }>({ holding: false });
@@ -50,6 +57,13 @@ export function RaceApp() {
   const sum = ac.summary;
   const last = ac.last;
   const plan = ac.plan();
+  const s = lab.settings.auto;
+  const pred = useMemo(() => tuningInUse(s, lab.profile).profile.predictedS, [s, lab.profile]);
+
+  // The runs so far, ready for "Copy logs" (read again after every run).
+  useEffect(() => {
+    void lab.autoRunAnalyses().then(setRuns).catch(() => setRuns([]));
+  }, [lab, sum]);
 
   // Haptics on what matters: a recovery, losing the robot, the finish.
   const recovering = live?.recovering, holding = !!live?.holding;
@@ -98,6 +112,45 @@ export function RaceApp() {
     const r = await ac.findRobot();
     if (!r) throw new Error('No light blinked along: is the robot in the picture?');
   });
+  const reset = () => {
+    ac.reset();
+    setFlash(0);
+    vibrate(40);
+  };
+
+  // The race engineer through the Claude app: copy the logs, paste the answer.
+  const copyLogs = () => act('copy', async () => {
+    const list = runs.length ? runs : await lab.autoRunAnalyses();
+    if (!(await copyText(briefText(list)))) throw new Error('Copy failed');
+    vibrate(30);
+    toast('Logs copied: paste them into the Claude app, copy its whole answer, then tap Paste plan.');
+  });
+  const pastePlan = async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      // No clipboard access (permission, older browser): paste by hand.
+      setPasteText('');
+      setSheet('paste');
+      return;
+    }
+    takePlan(text);
+  };
+  const takePlan = (text: string) => act('plan', async () => {
+    if (!text.trim()) throw new Error('The clipboard is empty: copy the Claude app\'s whole answer first.');
+    const { review: r } = reviewPlan(text);
+    if (!r) throw new Error('No plan in the clipboard: copy the Claude app\'s whole answer (with its JSON), then Paste plan again.');
+    // Speeds only: track edits wait for a look in the classic interface.
+    await applyTuning(r.tuning);
+    setSheet(null);
+    vibrate([30, 40, 60]);
+    const notes = [
+      r.routeApplied.length ? 'track edits left out' : '',
+      r.warnings.length ? `${r.warnings.length} check${r.warnings.length > 1 ? 's' : ''} applied` : '',
+    ].filter(Boolean).join(' · ');
+    toast(`Plan "${r.tuning.label}" in use: predicted ${r.predictedS} s (was ${pred} s)${notes ? ` · ${notes}` : ''}. Undo in the menu.`);
+  });
 
   // Status
   const snap = lab.link.snapshot();
@@ -114,7 +167,6 @@ export function RaceApp() {
   // Setup: the saved lap the settings match, if any.
   const cur = JSON.stringify({ ...snapshotAuto(lab.settings.auto), matRot: null });
   const active = lab.settings.savedLaps.find((l) => JSON.stringify({ ...snapshotAuto(l.auto), matRot: null }) === cur);
-  const s = lab.settings.auto;
   const setupText = s.tuning ? s.tuning.label : `${s.speedCmS} cm/s · ${s.style === 'spin' ? 'spins' : 'curves'}`;
 
   // Sector bar
@@ -168,6 +220,7 @@ export function RaceApp() {
             {flash > 0 && <div className="rx-flash" key={flash} />}
             <div className="rx-cam-tag">
               <span className={`rx-state ${state[1]}`}>{state[0]}</span>
+              {!running && sum && !sum.finished && <span className="rx-why">{sum.reason}</span>}
               {running && <span>{live!.section.toUpperCase()} · {Math.round(live!.progress)}/{Math.round(live!.lengthCm)} cm{live!.step?.kind === 'path' ? ` · ${live!.step.e >= 0 ? '+' : ''}${live!.step.e.toFixed(1)} cm` : ''}</span>}
             </div>
           </div>
@@ -211,21 +264,18 @@ export function RaceApp() {
             {sum && !running && <span>RECOV <b>{sum.recoveries?.length ?? 0}</b></span>}
             {running && <span>RECOV <b>{live!.recoveries}</b></span>}
           </div>
-          {sum && !running && !sum.finished && <div className="rx-reason">{sum.reason}</div>}
         </div>
         <div className="rx-rule" />
         <button className="rx-setup rx-in d3" onClick={() => setSheet('laps')} disabled={running}>
-          <span className="rx-label">Setup</span>
+          <span className="rx-label">Setup<em>pred {pred} s</em></span>
           <span className="rx-v">{active ? <>{active.name.split(' · ')[0]} <i>★ saved</i></> : <>{setupText} <i>▸</i></>}</span>
         </button>
+        <div className="rx-row rx-in d3">
+          <button className="rx-btn sm" disabled={!!busy || running} onClick={copyLogs}>{busy === 'copy' ? 'Copying…' : '⧉ Copy logs'}</button>
+          <button className="rx-btn sm" disabled={!!busy || running || ac.countdown !== null} onClick={() => void pastePlan()}>{busy === 'plan' ? 'Reading…' : '⇣ Paste plan'}</button>
+        </div>
 
         <div className="rx-actions rx-in d4">
-          {!running && sum?.finished && (
-            <button className="rx-btn lime" disabled={!!ac.savedId} onClick={() => void act('save', async () => {
-              const l = await ac.saveLastLap();
-              if (l) toast(`Saved ${l.name}`);
-            })}>{ac.savedId ? '★ Lap saved' : `★ Save lap · ${secs(sum.timeMs)} s`}</button>
-          )}
           {!linkOk ? (
             <button className="rx-go-btn" disabled={busy === 'connect'} onClick={connect}>{busy === 'connect' ? 'Pairing…' : 'Connect'}</button>
           ) : !cc.running ? (
@@ -234,7 +284,17 @@ export function RaceApp() {
             <button className="rx-stop-btn" onClick={stop}>Stop</button>
           ) : (
             <>
-              <button className="rx-btn" disabled={ac.blinking || !!busy} onClick={find}>{ac.blinking ? 'Blinking…' : 'Find robot'}</button>
+              <div className="rx-row">
+                {sum?.finished ? (
+                  <button className="rx-btn lime" disabled={!!ac.savedId || !!busy} onClick={() => void act('save', async () => {
+                    const l = await ac.saveLastLap();
+                    if (l) toast(`Saved ${l.name}`);
+                  })}>{ac.savedId ? '★ Saved' : `★ Save ${secs(sum.timeMs)} s`}</button>
+                ) : (
+                  <button className="rx-btn" disabled={ac.blinking || !!busy} onClick={find}>{ac.blinking ? 'Blinking…' : 'Find robot'}</button>
+                )}
+                <button className="rx-btn" disabled={ac.blinking || !!busy} onClick={reset}>↺ Reset</button>
+              </div>
               <button className="rx-go-btn" disabled={!!busy || ac.blinking} onClick={start}>{busy === 'start' ? 'Ready…' : 'Start'}</button>
             </>
           )}
@@ -266,12 +326,25 @@ export function RaceApp() {
             <h2>MENU</h2>
             <button className="rx-btn" onClick={() => { enterFullscreen(); setSheet(null); }}>Full screen</button>
             <button className="rx-btn" disabled={!cc.running || running} onClick={() => { ac.redetect(); setSheet(null); }}>Re-detect track</button>
+            <button className="rx-btn" disabled={running || !s.tuningPrev} onClick={() => void undoTuning().then((b) => { toast(`Setup back to "${b?.label ?? 'constant speed'}"`); setSheet(null); })}>
+              Undo plan{s.tuningPrev ? ` → ${s.tuningPrev.label}` : ''}
+            </button>
             <button className="rx-btn" disabled={!linkOk} onClick={() => { ac.lightsOn(); setSheet(null); }}>Lights on</button>
             <button className="rx-btn" disabled={!cc.running || running} onClick={() => { cc.stop(); setSheet(null); }}>Camera off</button>
             <button className="rx-btn" disabled={!linkOk || running} onClick={() => void lab.disconnect()}>Disconnect</button>
             <div className="rx-rule" />
             <button className="rx-btn lime" disabled={running} onClick={() => void lab.setSettings({ ui: 'classic' })}>Classic interface</button>
             <p className="rx-note">The classic interface has every tool: driving, lap tuning, the race engineer, the track code, tests.</p>
+          </div>
+        </div>
+      )}
+      {sheet === 'paste' && (
+        <div className="rx-sheet-bg" onClick={() => setSheet(null)}>
+          <div className="rx-sheet" onClick={(e) => e.stopPropagation()}>
+            <h2>PASTE PLAN</h2>
+            <p className="rx-note">The browser didn't let the app read the clipboard. Long-press the box, Paste, then Use plan.</p>
+            <textarea className="rx-paste" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="The Claude app's answer" autoFocus />
+            <button className="rx-btn lime" disabled={!pasteText.trim() || !!busy} onClick={() => takePlan(pasteText)}>Use plan</button>
           </div>
         </div>
       )}

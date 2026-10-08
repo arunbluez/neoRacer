@@ -369,6 +369,30 @@ class AutoController {
     AutoRun.lightsOn(lab.link, this.settings);
   }
 
+  /**
+   * Back to the start line after a run (stopped, finished or failed): motors
+   * off, the result and trails cleared, the lights in the marker colour, and
+   * the camera looking for the robot at the start again.
+   */
+  reset(): void {
+    const lab = getLab();
+    if (lab.auto?.state === 'running' || this.countdown !== null) lab.stopAll('reset (race view)');
+    else if (lab.link.connected) void lab.link.stop();
+    this.summary = undefined;
+    this.error = undefined;
+    this.lastRunSettings = undefined;
+    this.savedId = undefined;
+    this.identified = null;
+    this.lastBlink = undefined;
+    this.refindHold = undefined;
+    this.countdown = null;
+    this.trail.length = 0;
+    this.estTrail.length = 0;
+    this.lightsOn();
+    lab.logger.log('app', { event: 'auto.reset' });
+    useApp.getState().bump();
+  }
+
   /** Keep the last finished lap: its time and the settings that drove it. */
   async saveLastLap(): Promise<SavedLap | null> {
     const sum = this.summary, st = this.lastRunSettings;
