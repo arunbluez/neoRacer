@@ -188,3 +188,12 @@
   like zopip (default numbers, weak right wheel, camera off by cm at the far end) finishing, and
   the same robot calibrated finishing with fewer recoveries.
 
+## First finished lap (2026-10-08, field test 4)
+
+- zopip (still without motor numbers) finished a lap at 29 cm/s in 30.3 s with one recovery; at
+  35 cm/s it recovered 8 times and stopped at the cap in f, at 46 cm/s it left the lane in a.
+- A robot without motor numbers starts with a wide uncertainty on its turning bias and speed, so
+  the estimator learns the pull in the first metres (in the simulator: 1 recovery a lap instead of 5).
+- Up to 20 recoveries a lap (was 8; still 3 at one spot at most), so practice laps finish and log
+  the whole track.
+

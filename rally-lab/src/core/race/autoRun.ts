@@ -100,7 +100,7 @@ export const DEFAULT_AUTO_SETTINGS: AutoSettings = {
   lostStopMs: 30000,
   stuckStopMs: 1500,
   recover: true,
-  maxRecoveries: 8,
+  maxRecoveries: 20,
   lineFixes: true,
   lineAheadCm: 5,
   lineHalfSpacingCm: 0.8,
@@ -238,7 +238,12 @@ export class AutoRun {
     this.plan = buildPlan(this.route, settings.style, { maxSpinDeg: settings.maxSpinDeg });
     this.lane = buildPlan(withoutOffsets(this.route), 'arc');
     this.model = motorModel(deps.profile);
-    this.est = new PoseEstimator(this.model, { markerAheadCm: settings.markerAheadCm, cmdLatencyMs: settings.cmdLatencyMs });
+    // Without motor numbers (no deadband test yet) the robot may pull hard: learn it fast.
+    const calibrated = !!deps.profile?.deadband;
+    this.est = new PoseEstimator(this.model, {
+      markerAheadCm: settings.markerAheadCm, cmdLatencyMs: settings.cmdLatencyMs,
+      ...(calibrated ? {} : { biasSigmaDegS: 35, speedScaleSigma: 0.3 }),
+    });
     this.follower = new Follower(this.plan, this.model, {
       speedCmS: settings.speedCmS, curveSpeedCmS: settings.curveSpeedCmS, settleCm: settings.settleCm, spinCmd: settings.spinCmd,
       spinLeadMs: settings.spinLeadMs, settleMs: settings.settleMs, afterSpinMs: settings.afterSpinMs,

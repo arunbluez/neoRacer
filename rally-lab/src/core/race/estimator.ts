@@ -26,6 +26,13 @@ export type EstimatorOpts = {
    * after frame. Position fixes give the heading as soon as the robot moves.
    */
   headingSigmaDeg: number;
+  /**
+   * How unsure it starts about the turning bias (deg/s) and the speed scale.
+   * Wide for a robot without motor numbers (it may pull 30 °/s): it then
+   * learns the pull in the first metres instead of over half the lap.
+   */
+  biasSigmaDegS: number;
+  speedScaleSigma: number;
 };
 
 export const DEFAULT_ESTIMATOR_OPTS: EstimatorOpts = {
@@ -35,6 +42,8 @@ export const DEFAULT_ESTIMATOR_OPTS: EstimatorOpts = {
   historyMs: 1500,
   fixSigmaCm: 1.2,
   headingSigmaDeg: 0,
+  biasSigmaDegS: 14,
+  speedScaleSigma: 0.15,
 };
 
 export type EstPose = {
@@ -116,7 +125,7 @@ export class PoseEstimator {
   /** Start from a pose (axle, heading) at time t. */
   reset(pose: { x: number; y: number; headingDeg: number }, t: number, sigma: { cm: number; deg: number } = { cm: 3, deg: 8 }): void {
     this.s = [pose.x, pose.y, pose.headingDeg * RAD, 0, 1, 1];
-    this.P = eye([sigma.cm ** 2, sigma.cm ** 2, (sigma.deg * RAD) ** 2, 0.25 ** 2, 0.15 ** 2, 0.12 ** 2]);
+    this.P = eye([sigma.cm ** 2, sigma.cm ** 2, (sigma.deg * RAD) ** 2, (this.opts.biasSigmaDegS * RAD) ** 2, this.opts.speedScaleSigma ** 2, 0.12 ** 2]);
     this.t = t;
     this.vl = this.vr = 0;
     this.snaps = [{ t, s: [...this.s], P: [...this.P], vl: 0, vr: 0 }];
