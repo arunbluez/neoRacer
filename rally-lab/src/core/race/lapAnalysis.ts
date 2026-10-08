@@ -24,6 +24,8 @@ export type PartStats = {
   /** Line sensors: one sensor off the lane band (a nudge), both black (leaving the lane). */
   lineOne: number;
   lineBoth: number;
+  /** Times the robot had to back up and find its way again here (off the lane, stuck, off the path). */
+  recoveries: number;
   /** Camera: fixes used, the mean and worst correction they made (cm), the longest gap between fixes (ms). */
   fixes: number;
   corrMeanCm: number;
@@ -88,6 +90,7 @@ type RawRun = {
   ticks: Tick[];
   fixes: { t: number; sec: string; turn: boolean; corr: number; used: boolean }[];
   lines: { t: number; s: number; code: number; sec: string; turn: boolean }[];
+  recs: { s: number; sec: string; turn: boolean; why: string }[];
   cams: LogEvent[];
   end?: LogEvent;
   plan: Plan;
@@ -119,7 +122,7 @@ function rawRuns(events: LogEvent[]): RawRun[] {
       const st = (e.settings ?? {}) as { route?: RouteSpec; maxSpinDeg?: number };
       const route = st.route ?? RALLY_ROUTE;
       const style = (e.style === 'spin' ? 'spin' : 'arc') as TurnStyle;
-      cur = { start: e, ticks: [], fixes: [], lines: [], cams: [], plan: buildPlan(route, style, { maxSpinDeg: st.maxSpinDeg }), route };
+      cur = { start: e, ticks: [], fixes: [], lines: [], recs: [], cams: [], plan: buildPlan(route, style, { maxSpinDeg: st.maxSpinDeg }), route };
       out.push(cur);
       lastTick = undefined;
       continue;
@@ -138,10 +141,14 @@ function rawRuns(events: LogEvent[]): RawRun[] {
     } else if (e.k === 'auto.fix') {
       if (lastTick) cur.fixes.push({ t: e.t, sec: lastTick.sec, turn: lastTick.turn, corr: Math.hypot(num(e.dx), num(e.dy)), used: !!e.used });
     } else if (e.k === 'auto.line') {
-      if (e.ignored) continue;
+      if (e.ignored || e.rec) continue;
       const s = num(e.s);
       const p = pointAt(cur.plan, s);
       cur.lines.push({ t: e.t, s, code: num(e.code), sec: p?.section ?? lastTick?.sec ?? '', turn: !!p?.turn });
+    } else if (e.k === 'auto.recover') {
+      const s = num(e.s);
+      const p = pointAt(cur.plan, s);
+      cur.recs.push({ s, sec: p?.section ?? lastTick?.sec ?? '', turn: !!p?.turn, why: String(e.why ?? '') });
     } else if (e.k === 'auto.cam') {
       cur.cams.push(e);
     } else if (e.k === 'auto.end') {
@@ -152,7 +159,7 @@ function rawRuns(events: LogEvent[]): RawRun[] {
   return out;
 }
 
-function partStats(ticks: Tick[], fixes: RawRun['fixes'], lines: RawRun['lines'], lengthCm: number, tickMs: number): PartStats | null {
+function partStats(ticks: Tick[], fixes: RawRun['fixes'], lines: RawRun['lines'], recs: RawRun['recs'], lengthCm: number, tickMs: number): PartStats | null {
   if (!ticks.length) return null;
   const offs = ticks.filter((t) => t.kind === 'path').map((t) => Math.abs(t.e)).sort((a, b) => a - b);
   const timeMs = ticks.length * tickMs;
@@ -170,6 +177,7 @@ function partStats(ticks: Tick[], fixes: RawRun['fixes'], lines: RawRun['lines']
     maxHeadingErrDeg: r1(Math.max(0, ...ticks.filter((t) => t.kind === 'path').map((t) => Math.abs(t.he)))),
     lineOne: lines.filter((l) => l.code === 1 || l.code === 2).length,
     lineBoth: lines.filter((l) => l.code === 3).length,
+    recoveries: recs.length,
     fixes: used.length,
     corrMeanCm: r1(corr.length ? corr.reduce((a, b) => a + b, 0) / corr.length : 0),
     corrMaxCm: r1(corr.length ? Math.max(...corr) : 0),
@@ -216,14 +224,14 @@ function analyzeRun(raw: RawRun, sessionId: string, n: number): RunAnalysis {
     // A section only partly driven: count the distance driven.
     const frac = completed ? 1 : Math.max(0, Math.min(1, (progress - startS) / Math.max(1, endS - startS)));
     const sTicks = ticks.filter((t) => !t.turn), tTicks = ticks.filter((t) => t.turn);
-    const fx = raw.fixes.filter((f) => f.sec === id), ln = raw.lines.filter((l) => l.sec === id);
+    const fx = raw.fixes.filter((f) => f.sec === id), ln = raw.lines.filter((l) => l.sec === id), rc = raw.recs.filter((x) => x.sec === id);
     return {
       id,
       reached,
       completed: reached && completed,
       timeMs: reached ? Math.round(ticks[ticks.length - 1].t - ticks[0].t + tickMs) : 0,
-      straight: partStats(sTicks, fx.filter((f) => !f.turn), ln.filter((l) => !l.turn), L.straight * frac, tickMs),
-      turn: partStats(tTicks, fx.filter((f) => f.turn), ln.filter((l) => l.turn), L.turn * frac, tickMs),
+      straight: partStats(sTicks, fx.filter((f) => !f.turn), ln.filter((l) => !l.turn), rc.filter((x) => !x.turn), L.straight * frac, tickMs),
+      turn: partStats(tTicks, fx.filter((f) => f.turn), ln.filter((l) => l.turn), rc.filter((x) => x.turn), L.turn * frac, tickMs),
       stoppedHere: !finished && reached && !completed && lastTick?.sec === id,
       asked: { straightCmS: asked.straightCmS, turnCmS: asked.turnCmS },
     };

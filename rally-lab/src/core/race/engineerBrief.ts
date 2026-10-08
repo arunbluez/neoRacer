@@ -102,9 +102,10 @@ The knobs and their limits
 
 How to work
 - Read the runs. Per section you get the straights and the turns separately: time, length, driven speed, target speed, distance off the path (worst, mean, 90th percentile), heading error, line sensor events (one sensor = a nudge back, both = leaving the lane), camera fixes, how much the camera had to correct the estimate, and the longest camera gap. A run that stopped says where.
-- Fix what failed first: where it stopped or a sensor saw both black, slow that part down and brake earlier into it; don't raise anything right after a failure in that section.
+- Fix what failed first: where it stopped, had to recover (back up and find the route again: "recoveries") or a sensor saw both black, slow that part down and brake earlier into it; don't raise anything right after a failure in that section. A recovery costs ~2 s.
 - Raise what was clean, most where the clock gains most: long straights first (c, then b, d, g), then braking/acceleration, turns last and in smaller steps. Mind the turn floors: raising a turn speed below its floor gains nothing.
 - Wide in a turn after a fast straight usually means braking too late (lower decelCmS2) rather than a slow turn.
+- Look at "learned" in each run (what the estimator found about the motors). A turning bias over ~10 °/s or a speed scale far from 1 means the robot's motor numbers are wrong (uncalibrated, or one wheel weaker): say that first, and that the fix is the Deadband (T3.1) and Straight check (T3.7) tests, not the speeds. Slowing such a robot down makes it worse: its weaker wheel stalls near its deadband.
 - Use predict_lap to check candidate tunings: it gives the lap time the profile predicts, per section, and what the app's limits would make of your numbers. Use section_trace when a section's numbers don't explain themselves.
 - Route edits (track code) only when several runs show the same geometric error in the same place with good camera coverage, e.g. always turning late at the same corner. Straights: lengthCm; turns: radiusCm; at most 15 % or 15 cm per step; turn angles never change (the mat fixes them). Most of the time: no route edits.
 - Say what the next lap should watch.
@@ -234,7 +235,10 @@ export function quickPlan(ctx: EngineerContext, createdAt: string): EngineerPlan
   return finishPlan({
     summary: `Quick tune from ${q.basedOn}: clean parts faster, wandering parts held or slower.`,
     tuning: q.tuning,
-    changes: q.reasons.map((r) => ({ what: r.split(':')[0], why: r.slice(r.indexOf(':') + 1).trim() })),
+    changes: [
+      ...q.warnings.filter((w) => w.startsWith('The robot pulled')).map((w) => ({ what: 'motor numbers', why: w })),
+      ...q.reasons.map((r) => ({ what: r.split(':')[0], why: r.slice(r.indexOf(':') + 1).trim() })),
+    ],
     routeEdits: [],
     watch: [],
     confidence: 'medium',

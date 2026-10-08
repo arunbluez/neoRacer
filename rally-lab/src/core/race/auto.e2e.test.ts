@@ -3,6 +3,7 @@
 // the robot's lights, the hand-held tracker turning them into fixes, and the
 // auto run driving the route.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RobotProfile } from '../model/profile';
 import { drive, makeLab } from '../testing/labHarness';
 import { PUGUZ_PROFILE, PUGUZ_SIM } from '../testing/simLap';
 import { CUTEBOT_LOOK, drawSimRobot, HANDHELD_AT_B, HandShake, projector, renderMatView } from '../sim/camera';
@@ -23,14 +24,19 @@ const model = laneModel(buildPlan(paintedRoute(RALLY_ROUTE), 'arc').outline, 9, 
 type Hooks = {
   /** The camera can't see the robot (ms since the start). */
   hide?: (ms: number) => boolean;
+  /** No robot profile (an uncalibrated robot: the default motor model). */
+  uncalibrated?: boolean;
+  /** A robot profile instead of puguz's. */
+  profile?: Partial<RobotProfile>;
   /** Change the world as the run goes (ms since the start, where the robot really is). */
-  world?: (ms: number, w: { params: { linear?: { a: number; b: number } } }, truth: { x: number; y: number }) => void;
+  world?: (ms: number, w: { params: { linear?: { a: number; b: number }; rightFactor: number } }, truth: { x: number; y: number }) => void;
 };
 
 async function lap(settings: Partial<AutoSettings>, camera = true, hooks: Hooks = {}) {
   const { lab, mock, clock, store } = await makeLab({ withTrack: true });
   Object.assign(mock.world.params, PUGUZ_SIM);
-  await lab.updateProfile(PUGUZ_PROFILE);
+  if (hooks.profile) await lab.updateProfile(hooks.profile);
+  else if (!hooks.uncalibrated) await lab.updateProfile(PUGUZ_PROFILE);
   const s: AutoSettings = { ...DEFAULT_AUTO_SETTINGS, ...settings };
   const auto = lab.createAuto(s);
   AutoRun.lightsOn(lab.link, s);
@@ -140,14 +146,64 @@ describe('camera-assisted auto run (simulated)', () => {
     expect(worst).toBeLessThan(10);
   }, 90_000);
 
-  it('stops when the camera sees the robot stuck', async () => {
-    const { summary } = await lap({ style: 'arc', speedCmS: 22 }, true, {
+  it('backs up and carries on when it leaves the lane', async () => {
+    // On c past the cones, the right wheel suddenly runs far faster for 0.7 s: it veers off the lane.
+    let t0 = -1;
+    const { summary, events } = await lap({ style: 'arc', speedCmS: 22 }, true, {
+      world: (ms, w, truth) => {
+        if (t0 < 0 && truth.x > 130 && truth.y < 115 && truth.y > 60) t0 = ms;
+        w.params.rightFactor = t0 >= 0 && ms - t0 < 700 ? 2.2 : PUGUZ_SIM.rightFactor!;
+      },
+    });
+    if (process.env.DUMP) console.log('lane', JSON.stringify(summary.recoveries), JSON.stringify(events.filter((e) => ['auto.recover', 'auto.recovered'].includes(e.k))), summary.edgeFixes, summary.timeMs);
+    const kinds = events.map((e) => e.k);
+    expect(kinds).toContain('auto.recover');
+    expect(kinds).toContain('auto.recovered');
+    expect(summary.recoveries.length).toBeGreaterThanOrEqual(1);
+    expect(summary.reason).toBe('finished');
+  }, 90_000);
+
+  it('finishes with an uncalibrated robot that pulls hard, and a camera that is off at the far end', async () => {
+    // Like zopip on 8 Oct: no motor numbers (default model), right wheel 25 % weak, and the
+    // lights' height set wrong (3 cm for 1.5): the camera puts the robot cm off in the zigzag.
+    const run = () => lap({ style: 'arc', speedCmS: 22, markerHeightCm: 3 }, true, {
+      uncalibrated: true,
+      world: (_ms, w) => {
+        w.params.rightFactor = 0.82;
+      },
+    });
+    const first = await run();
+    if (process.env.DUMP) console.log('uncalibrated', first.summary.reason, first.summary.recoveries, first.summary.edgeFixes, first.summary.learned, first.worst);
+    expect(first.summary.reason).toBe('finished');
+    expect(first.summary.edgeFixes.used).toBeGreaterThan(0);
+    // The same robot calibrated (T3.1 deadband, T3.7 trim): no recoveries needed.
+    const cal = await lap({ style: 'arc', speedCmS: 22, markerHeightCm: 3 }, true, {
+      profile: { deadband: { lf: 18, lb: 18, rf: 18, rb: 18 }, speedTable: [{ cmd: 30, cmPerS: 33.3 }, { cmd: 50, cmPerS: 56.7 }], trim: 0.22 },
+      world: (_ms, w) => {
+        w.params.rightFactor = 0.82;
+      },
+    });
+    expect(cal.summary.reason).toBe('finished');
+    expect(cal.summary.recoveries.length).toBeLessThan(first.summary.recoveries.length);
+  }, 120_000);
+
+  it('gets unstuck when it can, and gives up when it can\'t', async () => {
+    // Held for 2.5 s (a cone), then free: it backs up and carries on.
+    const freed = await lap({ style: 'arc', speedCmS: 22 }, true, {
+      world: (ms, w) => {
+        w.params.linear = ms > 2500 && ms < 5000 ? { a: 0, b: 0 } : PUGUZ_SIM.linear;
+      },
+    });
+    expect(freed.summary.recoveries[0]?.why).toMatch(/^stuck/);
+    expect(freed.summary.reason).toBe('finished');
+    // Held for good: three tries at the same spot, then it stops.
+    const held = await lap({ style: 'arc', speedCmS: 22 }, true, {
       world: (ms, w) => {
         w.params.linear = ms > 2500 ? { a: 0, b: 0 } : PUGUZ_SIM.linear;
       },
     });
-    expect(summary.reason).toMatch(/^stuck/);
-  }, 60_000);
+    expect(held.summary.reason).toMatch(/^stuck.*gave up/);
+  }, 120_000);
 
   it('stops when told to, and when the page is hidden', async () => {
     const { lab, mock, clock } = await makeLab({ withTrack: true });

@@ -39,6 +39,7 @@ type Verdict = 'clean' | 'ok' | 'bad' | 'none';
 
 function judge(p: PartStats | null, r: QuickTuneRules): { v: Verdict; why: string } {
   if (!p || p.timeMs === 0) return { v: 'none', why: '' };
+  if (p.recoveries > 0) return { v: 'bad', why: `had to back up and find the route ${p.recoveries}×` };
   if (p.lineBoth > 0) return { v: 'bad', why: `both line sensors black ${p.lineBoth}×` };
   if (p.maxOffCm > r.badOffCm) return { v: 'bad', why: `${p.maxOffCm} cm off the path` };
   if (p.lineOne >= 3) return { v: 'bad', why: `line sensor nudges ${p.lineOne}×` };
@@ -114,5 +115,10 @@ export function quickTune(run: RunAnalysis, current: Tuning, n: number, rules: Q
     reasons.push('every section clean: accelerate and brake a little harder');
   }
   const { tuning, warnings } = clampTuning(next, current, Object.keys(current.sections));
+  // A strong pull is the motor numbers, not the speeds: slowing down doesn't cure it.
+  const b = run.learned?.biasDegS ?? 0;
+  if (Math.abs(b) > 12) {
+    warnings.unshift(`The robot pulled ${Math.abs(b)} °/s to the ${b > 0 ? 'right' : 'left'}: its motor numbers are off. Run Deadband (T3.1) and Straight check (T3.7) first; slower won't fix a pull (a weak wheel stalls sooner).`);
+  }
   return { tuning: { ...tuning, label: `quick ${n}`, source: 'quick' }, reasons, warnings, basedOn: run.id };
 }

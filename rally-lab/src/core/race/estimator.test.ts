@@ -97,4 +97,15 @@ describe('pose estimator', () => {
     expect(last!.reason).toBe('reset');
     expect(e.pose.x).toBeGreaterThan(140);
   });
+
+  it('takes a line sensor at the lane edge as a sideways fix', () => {
+    const est = new PoseEstimator(motorModel(PUGUZ_PROFILE));
+    // Driving along +x, the estimate on the lane's centre line (y = 100), unsure sideways.
+    est.reset({ x: 50, y: 100, headingDeg: 0 }, 0, { cm: 6, deg: 3 });
+    // The left sensor (5 cm ahead, 0.8 cm left) reads black: it is at the band's left edge, 11 cm left of the centre.
+    const res = est.addEdge(0, { c: { x: 55, y: 100 }, n: { x: 0, y: 1 }, offsetCm: -11, ahead: 5, right: -0.8 });
+    expect(res.used).toBe(true);
+    expect(est.pose.y).toBeLessThan(100 - 7); // pulled most of the way to the edge
+    expect(est.pose.x).toBeCloseTo(50, 0); // along the lane: unchanged
+  });
 });

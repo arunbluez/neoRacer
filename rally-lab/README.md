@@ -35,12 +35,25 @@ both black (off the lane) stops the run.
    make the next lap faster with **Lap tuning** (below), or export the logs (**Export logs**) and
    send them over: the route and the tuning get corrected from them.
 
-If the camera loses the robot (outside the bridge) for a second, the robot **holds still** and the
-camera looks along the route back to where it last saw it (an orange strip on the picture); found,
-it carries on from there, with the route's heading. A robot that slipped or pushed against a cone
-falls behind its estimate, and before this the estimate drove on and the camera looked in the wrong
-place. Not found within 8 s: the run stops. If the camera sees the robot standing still while it's
-driven for 1.5 s, the run stops as **stuck**.
+A run doesn't end at the first problem; it **recovers** and carries on:
+
+- **Off the lane** (both line sensors black), **stuck** (the camera sees it not moving while it's
+  driven) or **off the path** (the camera sees it 18 cm off): it stops, backs straight up until the
+  sensors see the lane again, gives the camera a moment, picks the route up where it is, turns on
+  the spot to face along it if needed, and drives on. After 8 recoveries, or 3 at the same spot, it
+  stops.
+- **Camera lost the robot** (outside the bridge) for a second: it holds still and the camera looks
+  along the route back to where it last saw it (an orange strip on the picture). Not there after
+  3 s: it blinks the lights and finds the robot wherever it is. It gives up after 30 s.
+- The line sensors also correct the position: a sensor reading black is at the lane band's edge,
+  11 cm from the painted centre line, a sideways fix exact to a centimetre where the camera is least
+  sure (the far end of the mat).
+- While driving, motor commands and line queries go out packed into one Bluetooth write.
+
+A robot without motor numbers (no Deadband test yet) gets a note on the Auto screen: robots differ a
+lot (zopip's right wheel barely turned at the command that drives the left at 20 cm/s), and the
+default numbers make it pull hard to one side. Run **Deadband** (T3.1) and **Straight check** (T3.7)
+once per robot; in the simulator that took a robot like zopip from 5 recoveries a lap to none.
 
 The **Cone dodges** card moves the route sideways around the cones on c (they get moved from day to
 day): watch the route line on the live picture and slide it clear of them. The robot is ~10 cm wide.

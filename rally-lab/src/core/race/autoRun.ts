@@ -14,8 +14,8 @@ import type { PollerEntry } from '../settings';
 import type { Clock } from '../types';
 import { PoseEstimator, type EstPose } from './estimator';
 import { Follower, type FollowStep } from './follower';
-import { motorModel, type MotorModel } from './motor';
-import { buildPlan, RALLY_ROUTE, wrapDeg, type Plan, type RouteSpec, type TurnStyle } from './route';
+import { minWheelSpeed, motorModel, spinRateDegS, wheelCommand, wheelSpeed, type MotorModel } from './motor';
+import { buildPlan, RALLY_ROUTE, withoutOffsets, wrapDeg, type PathPt, type Plan, type RouteSpec, type TurnStyle } from './route';
 import { buildSpeedProfile, type SpeedProfile } from './speedProfile';
 import type { Tuning } from './tuning';
 
@@ -56,8 +56,20 @@ export type AutoSettings = {
    */
   lostPauseMs: number;
   lostStopMs: number;
-  /** Stop when the camera sees the robot not moving for this long while it is driven, ms (0 = never). */
+  /** The camera sees the robot not moving for this long while it is driven: stuck, ms (0 = never). */
   stuckStopMs: number;
+  /**
+   * Off the lane, stuck or off the path: back up onto the lane, find the route
+   * again and carry on (off: stop the run). Gives up after maxRecoveries, or
+   * after 3 at the same spot.
+   */
+  recover: boolean;
+  maxRecoveries: number;
+  /** Use the line sensors at the lane's edge as sideways position fixes. */
+  lineFixes: boolean;
+  /** Where the line sensors are: ahead of the wheel axle, and half the distance between them, cm. */
+  lineAheadCm: number;
+  lineHalfSpacingCm: number;
   /** The track code in use; undefined = the measured Robot Rallye track. */
   route?: RouteSpec;
   /** Lap tuning: per-section speeds, acceleration and braking; undefined = the constant speeds above. */
@@ -93,8 +105,13 @@ export const DEFAULT_AUTO_SETTINGS: AutoSettings = {
   tickMs: 40,
   offTrackStopCm: 18,
   lostPauseMs: 1000,
-  lostStopMs: 8000,
+  lostStopMs: 30000,
   stuckStopMs: 1500,
+  recover: true,
+  maxRecoveries: 8,
+  lineFixes: true,
+  lineAheadCm: 5,
+  lineHalfSpacingCm: 0.8,
   matRot: null,
   version: 3,
 };
@@ -148,6 +165,10 @@ export type AutoSummary = {
   lineEvents: number;
   /** Times it held still because the camera had lost it. */
   holds: number;
+  /** Times it backed up and found its way again (off the lane, stuck, off the path), where and why. */
+  recoveries: { s: number; why: string }[];
+  /** Line-sensor edge fixes used / offered. */
+  edgeFixes: { used: number; total: number };
   learned: { biasDegS: number; speedScale: number; turnScale: number };
   spins: { section: string; deltaDeg: number; durMs: number; headingErrAfterDeg?: number }[];
 };
@@ -162,9 +183,13 @@ export type AutoLive = {
   lengthCm: number;
   section: string;
   reason?: string;
-  /** Holding still: the camera lost the robot. */
+  /** Holding still: the camera lost the robot (since, ms). */
   holding: boolean;
+  heldMs: number;
+  /** Backing up and finding its way again. */
+  recovering?: string;
 };
+
 
 type Deps = {
   link: Pick<RobotLink, 'send' | 'stop' | 'connected' | 'onReply' | 'onState'>;
@@ -172,7 +197,11 @@ type Deps = {
   logger: Pick<Logger, 'log' | 'rel'>;
   clock: Clock;
   profile?: RobotProfile;
+  /** Pack motor commands and line queries into one write during the run (fewer, fuller writes). */
+  setPacking?: (on: boolean) => void;
 };
+
+type Recovery = { why: string; phase: 'brake' | 'back' | 'settle' | 'turn' | 'after'; t0: number; sawWhite: boolean; dir: number; turnMs: number; cmd: number };
 
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const rgbCmd = (name: string, c: Rgb) => `${name},${c.r},${c.g},${c.b}`;
@@ -203,6 +232,11 @@ export class AutoRun {
   private holds = 0;
   /** Recent camera positions while driving (stuck detection). */
   private recent: { t: number; x: number; y: number }[] = [];
+  private rec: Recovery | null = null;
+  private recoveries: { s: number; why: string; t: number }[] = [];
+  /** The painted lane's centre line (the line sensors see its band). */
+  private readonly lane: Plan;
+  private edgeStats = { used: 0, total: 0 };
   private sections = new Map<string, SectionStats>();
   private lastStep?: FollowStep;
   private resolve?: (s: AutoSummary) => void;
@@ -215,6 +249,7 @@ export class AutoRun {
   constructor(private readonly deps: Deps, readonly settings: AutoSettings) {
     this.route = settings.route ?? RALLY_ROUTE;
     this.plan = buildPlan(this.route, settings.style, { maxSpinDeg: settings.maxSpinDeg });
+    this.lane = buildPlan(withoutOffsets(this.route), 'arc');
     this.model = motorModel(deps.profile);
     this.est = new PoseEstimator(this.model, { markerAheadCm: settings.markerAheadCm, cmdLatencyMs: settings.cmdLatencyMs });
     this.profile = buildSpeedProfile(this.plan, settings.tuning, this.model, settings);
@@ -264,6 +299,7 @@ export class AutoRun {
     // The camera has a moment to see the robot before the run holds for it.
     this.lastFixT = now;
     this.est.reset(sp.pose, now, sp.from === 'camera' ? { cm: 2, deg: 8 } : { cm: 4, deg: 10 });
+    this.deps.setPacking?.(true);
     for (const s of this.plan.sectionStarts) this.sections.set(s.id, { id: s.id, tStart: NaN, tEnd: NaN, maxE: 0, sumE: 0, n: 0, fixes: 0, lineEvents: 0 });
     logger.log('auto.start', {
       route: this.route.name, style: this.settings.style, lengthCm: r1(this.plan.lengthCm), legs: this.plan.legs.length,
@@ -365,7 +401,7 @@ export class AutoRun {
   private checkStuck(fix: CamFixIn): void {
     const lim = this.settings.stuckStopMs;
     const step = this.lastStep;
-    if (!lim || !step || step.kind !== 'path' || step.v < 10 || this.holdSince !== null) {
+    if (!lim || !step || step.kind !== 'path' || step.v < 10 || this.holdSince !== null || this.rec) {
       this.recent = [];
       return;
     }
@@ -375,7 +411,176 @@ export class AutoRun {
     if (fix.t - first.t < lim) return;
     let far = 0;
     for (const q of this.recent) far = Math.max(far, Math.hypot(q.x - first.x, q.y - first.y));
-    if (far < 3) this.stop(`stuck: the camera saw it not moving for ${(lim / 1000).toFixed(1)} s (against a cone?)`);
+    if (far < 3) this.recover(`stuck: the camera saw it not moving for ${(lim / 1000).toFixed(1)} s (against a cone?)`, this.deps.clock.now());
+  }
+
+  /**
+   * A line reading as a sideways position fix: a sensor reading black is just
+   * past the band's edge, 11 cm from the painted centre line; one reading
+   * white where the estimate has it past the edge is pulled back inside.
+   */
+  private edgeFix(code: number, t: number): void {
+    if (this.lastStep?.kind !== 'path') return;
+    const half = this.route.laneWidthCm / 2 + this.route.borderCm;
+    const a = this.settings.lineAheadCm, sp = this.settings.lineHalfSpacingCm;
+    const pose = this.est.pose;
+    const th = (pose.headingDeg * Math.PI) / 180;
+    const sensorAt = (right: number) => ({ x: pose.x + a * Math.cos(th) - right * Math.sin(th), y: pose.y + a * Math.sin(th) + right * Math.cos(th) });
+    const near = (q: { x: number; y: number }) => {
+      const s0 = this.follower.progress;
+      let best: PathPt | undefined, bd = Infinity;
+      for (const p of this.lane.outline) {
+        if (Math.abs(p.s - s0) > 45) continue;
+        const d = (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = p;
+        }
+      }
+      if (!best) return null;
+      const h = (best.headingDeg * Math.PI) / 180;
+      const n = { x: -Math.sin(h), y: Math.cos(h) };
+      return { c: { x: best.x, y: best.y }, n, off: n.x * (q.x - best.x) + n.y * (q.y - best.y) };
+    };
+    const obs: { right: number; offsetCm: number; sigmaCm: number }[] = [];
+    if (code === 1) obs.push({ right: sp, offsetCm: half + 0.5, sigmaCm: 1.5 });
+    else if (code === 2) obs.push({ right: -sp, offsetCm: -(half + 0.5), sigmaCm: 1.5 });
+    else if (code === 3) {
+      const g = near(sensorAt(0));
+      if (g) obs.push({ right: 0, offsetCm: Math.sign(g.off || 1) * (half + 1.5), sigmaCm: 2.5 });
+    } else {
+      // Both white: neither sensor is past the edge.
+      for (const right of [sp, -sp]) {
+        const g = near(sensorAt(right));
+        if (g && Math.abs(g.off) > half) obs.push({ right, offsetCm: Math.sign(g.off) * (half - 1.5), sigmaCm: 2 });
+      }
+    }
+    for (const o of obs) {
+      const g = near(sensorAt(o.right));
+      if (!g) continue;
+      this.edgeStats.total++;
+      const res = this.est.addEdge(t, { c: g.c, n: g.n, offsetCm: o.offsetCm, ahead: a, right: o.right, sigmaCm: o.sigmaCm });
+      if (res.used) this.edgeStats.used++;
+      if (code !== 0) this.deps.logger.log('auto.edge', { code, s: r1(this.follower.progress), off: r1(g.off), want: o.offsetCm, innov: r1(res.innov), used: res.used });
+    }
+  }
+
+  /** Off the lane, stuck or off the path: back up, find the route again and carry on. */
+  private recover(why: string, t: number): void {
+    if (this.state !== 'running') return;
+    if (!this.settings.recover) {
+      this.stop(why);
+      return;
+    }
+    const s = this.follower.progress;
+    const here = this.recoveries.filter((x) => Math.abs(x.s - s) < 25).length;
+    if (this.recoveries.length >= this.settings.maxRecoveries || here >= 3) {
+      this.stop(`${why} (gave up after ${this.recoveries.length} recoveries${here >= 3 ? ', 3 at this spot' : ''})`);
+      return;
+    }
+    this.recoveries.push({ s, why, t });
+    this.rec = { why, phase: 'brake', t0: t, sawWhite: false, dir: 0, turnMs: 0, cmd: 0 };
+    this.lineBlack = 0;
+    this.offTrackSince = null;
+    this.recent = [];
+    this.nudge = { k: 0, until: -Infinity };
+    this.holdSince = null;
+    this.deps.logger.log('auto.recover', { why, s: r1(s), n: this.recoveries.length });
+  }
+
+  private drive(l: number, r: number, t: number): void {
+    this.send(l, r, t);
+    this.est.setCommand(t, l, r);
+  }
+
+  private stepRecovery(t: number): void {
+    const rec = this.rec!;
+    const el = t - rec.t0;
+    const m = this.model;
+    const next = (phase: Recovery['phase']) => {
+      rec.phase = phase;
+      rec.t0 = t;
+    };
+    const vMin = Math.max(minWheelSpeed(m, 'L', false), minWheelSpeed(m, 'R', false));
+    switch (rec.phase) {
+      case 'brake':
+        this.drive(0, 0, t);
+        if (el >= 150) next('back');
+        return;
+      case 'back': {
+        // Straight back at the slowest speed until the sensors see the band again (and a bit more).
+        this.drive(wheelCommand(m, -vMin, 'L'), wheelCommand(m, -vMin, 'R'), t);
+        const dist = (vMin * el) / 1000;
+        if ((rec.sawWhite && dist >= 5) || dist >= 14 || el > 1500) next('settle');
+        return;
+      }
+      case 'settle': {
+        this.drive(0, 0, t);
+        if (el < 400) return; // the camera catches up
+        this.follower.resync(this.est.pose, 60);
+        // Face a point 12 cm along the route.
+        const pose = this.est.pose;
+        const tp = this.follower.target();
+        const aim = tp ? this.plan.outline.find((p) => p.s >= tp.s + 12) ?? tp : undefined;
+        const want = aim ? (Math.atan2(aim.y - pose.y, aim.x - pose.x) * 180) / Math.PI : pose.headingDeg;
+        const delta = wrapDeg(want - pose.headingDeg);
+        if (Math.abs(delta) < 25) {
+          this.endRecovery(t);
+          return;
+        }
+        const c = Math.max(this.settings.spinCmd, m.deadband.lb + 2, m.deadband.lf + 2, m.deadband.rb + 2, m.deadband.rf + 2);
+        const rate = spinRateDegS(m, c) * (pose.turnScale || 1);
+        rec.dir = Math.sign(delta);
+        rec.cmd = c;
+        rec.turnMs = rate > 0 ? (Math.abs(delta) / rate) * 1000 : 0;
+        next('turn');
+        return;
+      }
+      case 'turn': {
+        if (el < rec.turnMs) {
+          const vs = Math.abs(wheelSpeed(m, rec.cmd, 'L'));
+          this.drive(rec.dir < 0 ? -rec.cmd : rec.cmd, wheelCommand(m, rec.dir < 0 ? vs : -vs, 'R'), t);
+          return;
+        }
+        next('after');
+        return;
+      }
+      case 'after':
+        this.drive(0, 0, t);
+        if (el >= 250) this.endRecovery(t);
+        return;
+    }
+  }
+
+  private endRecovery(t: number): void {
+    this.follower.resync(this.est.pose, 60);
+    this.deps.logger.log('auto.recovered', { why: this.rec?.why, s: r1(this.follower.progress), ms: Math.round(t - (this.recoveries[this.recoveries.length - 1]?.t ?? t)) });
+    this.rec = null;
+    this.lineBlack = 0;
+    this.offTrackSince = null;
+    this.recent = [];
+  }
+
+  /** Our robot was found at pos (blinking): carry on from there. */
+  placeAt(pos: { x: number; y: number }, now: number): void {
+    if (this.state !== 'running') return;
+    const s0 = this.follower.progress;
+    let best: PathPt | undefined, bd = Infinity;
+    for (const p of this.plan.outline) {
+      if (p.s < s0 - 250 || p.s > s0 + 60) continue;
+      const d = (p.x - pos.x) ** 2 + (p.y - pos.y) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    if (!best) return;
+    const h = (best.headingDeg * Math.PI) / 180, a = this.settings.markerAheadCm;
+    this.est.relocate({ x: pos.x - a * Math.cos(h), y: pos.y - a * Math.sin(h), headingDeg: best.headingDeg }, { cm: 4, deg: 15 });
+    this.follower.resync(this.est.pose, 250);
+    this.lastFixT = now;
+    this.seenS = this.follower.progress;
+    this.deps.logger.log('auto.placed', { x: r1(pos.x), y: r1(pos.y), s: r1(this.follower.progress) });
   }
 
   /** The camera lost the robot: stand still and let it look; give up after lostStopMs. */
@@ -401,17 +606,23 @@ export class AutoRun {
     // The checkered start/finish squares read black; spins and their corners can read the border.
     const nearLine = s < 14 || s > this.plan.lengthCm - 14;
     const ignore = nearLine || step?.kind === 'spin';
-    this.deps.logger.log('auto.line', { code, s: r1(s), ignored: ignore || undefined });
+    this.deps.logger.log('auto.line', { code, s: r1(s), ignored: ignore || undefined, rec: this.rec?.phase });
+    if (this.rec) {
+      // Backing up: wait for the band again.
+      if (code === 0) this.rec.sawWhite = true;
+      return;
+    }
     if (ignore) {
       this.lineBlack = 0;
       return;
     }
+    if (this.settings.lineFixes) this.edgeFix(code, t - 30);
     const sec = step ? this.sections.get(step.section) : undefined;
     if (code === 3) {
       this.lineBlack++;
       this.lineEvents++;
       if (sec) sec.lineEvents++;
-      if (this.lineBlack >= 3) this.stop('left the lane (both line sensors black)');
+      if (this.lineBlack >= 3) this.recover('left the lane (both line sensors black)', this.deps.clock.now());
       return;
     }
     this.lineBlack = 0;
@@ -429,6 +640,14 @@ export class AutoRun {
     const t = clock.now();
     this.est.advance(t);
     const pose = this.est.pose;
+    if (this.rec) {
+      this.stepRecovery(t);
+      logger.log('auto.tick', {
+        s: r1(this.follower.progress), sec: this.lastStep?.section, kind: 'recover', ph: this.rec?.phase ?? 'done',
+        x: r1(pose.x), y: r1(pose.y), h: r1(pose.headingDeg), l: this.lastSent.l, r: this.lastSent.r,
+      });
+      return;
+    }
     // Lost by the camera (outside the bridge): hold still until it finds the robot again.
     const unseen = t - this.lastFixT;
     if (this.settings.cameraAssist && this.settings.lostPauseMs > 0) {
@@ -481,9 +700,9 @@ export class AutoRun {
     const lim = this.settings.offTrackStopCm;
     if (lim > 0 && this.settings.cameraAssist && camAge < 300 && step.kind === 'path' && Math.abs(step.e) > lim) {
       this.offTrackSince ??= t;
-      if (t - this.offTrackSince > 500) this.stop(`off the track: ${Math.round(Math.abs(step.e))} cm from the path`);
+      if (t - this.offTrackSince > 500) this.recover(`off the track: ${Math.round(Math.abs(step.e))} cm from the path`, t);
     } else this.offTrackSince = null;
-    const limitMs = (this.plan.lengthCm / Math.max(10, this.settings.speedCmS)) * 3000 + 30_000;
+    const limitMs = (this.plan.lengthCm / Math.max(10, this.settings.speedCmS)) * 3000 + 30_000 + 6000 * this.recoveries.length;
     if (t - this.t0 > limitMs) this.stop('timeout');
   }
 
@@ -523,6 +742,7 @@ export class AutoRun {
     for (const off of this.offs) off();
     this.offs = [];
     if (this.prevPoller) poller.set(this.prevPoller.entries, this.prevPoller.source);
+    this.deps.setPacking?.(false);
     const t = clock.now();
     const pose = this.est.pose;
     const finished = reason === 'finished';
@@ -536,6 +756,8 @@ export class AutoRun {
       fixes: { total: this.est.stats.fixes, used: this.est.stats.used, rejected: this.est.stats.rejected, resets: this.est.stats.resets },
       lineEvents: this.lineEvents,
       holds: this.holds,
+      recoveries: this.recoveries.map((x) => ({ s: r1(x.s), why: x.why })),
+      edgeFixes: { ...this.edgeStats },
       learned: { biasDegS: r1(pose.biasDegS), speedScale: Math.round(pose.speedScale * 100) / 100, turnScale: Math.round(pose.turnScale * 100) / 100 },
       spins: this.spinResults,
     };
@@ -550,6 +772,7 @@ export class AutoRun {
       running: this.state === 'running', t: t - this.t0, pose: this.est.pose, step: this.lastStep,
       lastFixAgeMs: t - this.lastFixT, progress: this.follower.progress, lengthCm: this.plan.lengthCm,
       section: this.lastStep?.section ?? this.plan.legs[0]?.section ?? '', reason: this.summary?.reason, holding: this.holdSince !== null,
+      heldMs: this.holdSince !== null ? t - this.holdSince : 0, recovering: this.rec?.why,
     };
   }
 }

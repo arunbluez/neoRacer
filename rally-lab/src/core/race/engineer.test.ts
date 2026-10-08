@@ -77,7 +77,7 @@ describe('lap analysis', () => {
 function part(over: Partial<PartStats>): PartStats {
   return {
     timeMs: 1000, lengthCm: 30, speedCmS: 30, targetMeanCmS: 30, targetMaxCmS: 30, maxOffCm: 2, meanOffCm: 1, p90OffCm: 1.5,
-    maxHeadingErrDeg: 5, lineOne: 0, lineBoth: 0, fixes: 10, corrMeanCm: 1, corrMaxCm: 2, camGapMaxMs: 150, ...over,
+    maxHeadingErrDeg: 5, lineOne: 0, lineBoth: 0, recoveries: 0, fixes: 10, corrMeanCm: 1, corrMaxCm: 2, camGapMaxMs: 150, ...over,
   };
 }
 
