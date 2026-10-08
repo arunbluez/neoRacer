@@ -1,0 +1,19 @@
+{
+  // The engineer command and the parts of the app's core it uses (lap
+  // analysis, tuning, the brief). Node types here; the core stays portable.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true
+  },
+  "include": ["*.ts"]
+}

@@ -13,6 +13,7 @@ import { LiveView } from '../camera/views';
 import { fmt, useLabVersion, useTicker } from '../hooks';
 import { getLab } from '../lab';
 import { autoController as ac } from '../race/autoController';
+import { LapTuning } from '../race/LapTuning';
 import { TrackEditor } from '../race/TrackEditor';
 import { drawLiveOverlay, MatMap } from '../race/views';
 import { SIDES } from '../../core/vision/handheld';
@@ -126,7 +127,7 @@ export function AutoScreen() {
         <div className="runview-status">
           <span className="badge">{matText}</span>
           <span className="badge">{robotText}</span>
-          <span className="badge">{s.speedCmS} cm/s · {s.style === 'spin' ? 'spins' : 'curves'}</span>
+          <span className="badge">{s.tuning ? s.tuning.label : `${s.speedCmS} cm/s`} · {s.style === 'spin' ? 'spins' : 'curves'}</span>
         </div>
         <button className="btn runview-close" onClick={exitFull} disabled={running} aria-label="Close full screen">✕ Close</button>
         <div className="runview-actions">
@@ -202,11 +203,18 @@ export function AutoScreen() {
       )}
 
       <div className="card">
-        <label className="field">
-          <span>Speed {s.speedCmS} cm/s {s.speedCmS <= 24 ? '(slowest)' : ''}</span>
-          <input type="range" min={18} max={60} step={1} value={s.speedCmS} disabled={running} onChange={(e) => set({ speedCmS: Number(e.target.value) })} />
-          <small className="hint">The robot can't go slower than ~22 cm/s (its deadband). In curves it speeds up so the inner wheel keeps turning: ~26 cm/s in the corners, ~33 cm/s in the zigzag's hairpins.</small>
-        </label>
+        {s.tuning ? (
+          <div className="field">
+            <span>Speeds from the lap tuning <b>{s.tuning.label}</b></span>
+            <small className="hint">Each section's speeds, acceleration and braking come from the tuning (Lap tuning, below). <button className="link-btn" disabled={running} onClick={() => set({ tuning: undefined, tuningPrev: s.tuning })}>Back to one constant speed</button></small>
+          </div>
+        ) : (
+          <label className="field">
+            <span>Speed {s.speedCmS} cm/s {s.speedCmS <= 24 ? '(slowest)' : ''}</span>
+            <input type="range" min={18} max={60} step={1} value={s.speedCmS} disabled={running} onChange={(e) => set({ speedCmS: Number(e.target.value) })} />
+            <small className="hint">The robot can't go slower than ~22 cm/s (its deadband). In curves it speeds up so the inner wheel keeps turning: ~26 cm/s in the corners, ~33 cm/s in the zigzag's hairpins.</small>
+          </label>
+        )}
         <div className="row" style={{ gap: 6, marginBottom: 8 }}>
           <span>Turns</span>
           <button className={`chip ${s.style === 'arc' ? 'chip-on' : ''}`} disabled={running} onClick={() => set({ style: 'arc' })}>Follow the curves</button>
@@ -263,6 +271,8 @@ export function AutoScreen() {
 
       {ac.summary && <Summary />}
 
+      <LapTuning disabled={running} />
+
       <div className="row" style={{ gap: 6, margin: '8px 0' }}>
         <button className="btn" onClick={() => void exportLogs()}>Export logs (session zip)</button>
         <button className="btn" onClick={() => void ac.saveViews('manual').then(() => toast('View saved to the session'))} disabled={!cc.running}>Save view</button>
@@ -284,20 +294,20 @@ function Summary() {
   const sum = ac.summary!;
   return (
     <div className="card">
-      <b>{sum.finished ? 'Lap finished' : `Stopped: ${sum.reason}`}</b> — {(sum.timeMs / 1000).toFixed(1)} s, {sum.progressCm} of {sum.lengthCm} cm
+      <b>{sum.finished ? 'Lap finished' : `Stopped: ${sum.reason}`}</b> — {(sum.timeMs / 1000).toFixed(1)} s{sum.predictedS ? ` (predicted ${sum.predictedS} s)` : ''}, {sum.progressCm} of {sum.lengthCm} cm{sum.tuning ? ` · ${sum.tuning}` : ''}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>section</th><th>s</th><th>max off cm</th><th>mean off cm</th><th>fixes</th></tr></thead>
+          <thead><tr><th>section</th><th>s</th><th>max off cm</th><th>mean off cm</th><th>fixes</th><th>lines</th></tr></thead>
           <tbody>
             {sum.sections.map((x) => (
-              <tr key={x.id}><td>{x.id}</td><td>{(x.timeMs / 1000).toFixed(1)}</td><td>{x.maxErrCm}</td><td>{x.meanErrCm}</td><td>{x.fixes}</td></tr>
+              <tr key={x.id}><td>{x.id}</td><td>{(x.timeMs / 1000).toFixed(1)}</td><td>{x.maxErrCm}</td><td>{x.meanErrCm}</td><td>{x.fixes}</td><td>{x.lineEvents ?? 0}</td></tr>
             ))}
           </tbody>
         </table>
       </div>
       <small className="hint">
         Camera fixes used {sum.fixes.used}/{sum.fixes.total}. Learned: pulls {sum.learned.biasDegS > 0 ? 'right' : 'left'} {Math.abs(sum.learned.biasDegS)} °/s,
-        speed ×{sum.learned.speedScale}, turning ×{sum.learned.turnScale}. Export the logs and send them over.
+        speed ×{sum.learned.speedScale}, turning ×{sum.learned.turnScale}. Next: Lap tuning below.
       </small>
     </div>
   );

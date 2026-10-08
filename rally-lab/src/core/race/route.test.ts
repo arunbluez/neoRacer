@@ -65,9 +65,12 @@ describe('route', () => {
   it('ramps offsets in and out smoothly', () => {
     const r = [{ from: 10, to: 20, offsetCm: 4 }];
     expect(offsetAt(r, 15)).toBe(4);
-    expect(offsetAt(r, 0)).toBeCloseTo(0.5 * (1 + Math.cos(Math.PI * 10 / 15)) * 4, 6);
-    expect(offsetAt(r, -10)).toBe(0);
-    expect(offsetAt(r, 40)).toBe(0);
+    expect(offsetAt(r, 0)).toBeCloseTo(0.5 * (1 + Math.cos(Math.PI * 10 / 25)) * 4, 6);
+    expect(offsetAt(r, -20)).toBe(0);
+    expect(offsetAt(r, 50)).toBe(0);
+    // The swap between the cones of section c is a gentle bend (radius > 25 cm), not a corner.
+    const c = buildPlan(RALLY_ROUTE, 'arc').outline.filter((p) => p.section === 'c' && !p.turn);
+    expect(Math.max(...c.map((p) => Math.abs(p.curv)))).toBeLessThan(1 / 25);
   });
 
   it('flags broken specs', () => {

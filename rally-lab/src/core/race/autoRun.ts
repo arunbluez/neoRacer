@@ -16,6 +16,8 @@ import { PoseEstimator, type EstPose } from './estimator';
 import { Follower, type FollowStep } from './follower';
 import { motorModel, type MotorModel } from './motor';
 import { buildPlan, RALLY_ROUTE, wrapDeg, type Plan, type RouteSpec, type TurnStyle } from './route';
+import { buildSpeedProfile, type SpeedProfile } from './speedProfile';
+import type { Tuning } from './tuning';
 
 export type AutoSettings = {
   style: TurnStyle;
@@ -48,6 +50,12 @@ export type AutoSettings = {
   offTrackStopCm: number;
   /** The track code in use; undefined = the measured Robot Rallye track. */
   route?: RouteSpec;
+  /** Lap tuning: per-section speeds, acceleration and braking; undefined = the constant speeds above. */
+  tuning?: Tuning;
+  /** The tuning before the last change (one step of undo). */
+  tuningPrev?: Tuning;
+  /** The tuning kept for the race (the final's one timed attempt), with the lap it drove. */
+  raceTuning?: { tuning: Tuning; lapMs: number; at: string };
   /** Where the camera views from, to remember the orientation (0..3, null = automatic). */
   matRot: number | null;
   /** Settings layout version (2: arcs became the default; 3: one light colour). */
@@ -100,7 +108,7 @@ export function trackingGate(o: {
 
 export type CamFixIn = { t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number; raw?: { x: number; y: number }; conf?: number };
 
-export type SectionStats = { id: string; tStart: number; tEnd: number; maxE: number; sumE: number; n: number; fixes: number };
+export type SectionStats = { id: string; tStart: number; tEnd: number; maxE: number; sumE: number; n: number; fixes: number; lineEvents: number };
 
 export type AutoSummary = {
   reason: string;
@@ -110,7 +118,10 @@ export type AutoSummary = {
   lengthCm: number;
   style: TurnStyle;
   speedCmS: number;
-  sections: { id: string; timeMs: number; maxErrCm: number; meanErrCm: number; fixes: number }[];
+  /** The lap tuning driven (label), and the lap time its profile predicted, s. */
+  tuning?: string;
+  predictedS: number;
+  sections: { id: string; timeMs: number; maxErrCm: number; meanErrCm: number; fixes: number; lineEvents: number }[];
   fixes: { total: number; used: number; rejected: number; resets: number };
   lineEvents: number;
   learned: { biasDegS: number; speedScale: number; turnScale: number };
@@ -146,6 +157,8 @@ export class AutoRun {
   readonly est: PoseEstimator;
   readonly follower: Follower;
   readonly route: RouteSpec;
+  /** Target speed along the plan (from the tuning, or the constant speeds). */
+  readonly profile: SpeedProfile;
   private timer: ReturnType<typeof setInterval> | null = null;
   private offs: (() => void)[] = [];
   private prevPoller?: { entries: PollerEntry[]; source: string };
@@ -171,9 +184,12 @@ export class AutoRun {
     this.plan = buildPlan(this.route, settings.style, { maxSpinDeg: settings.maxSpinDeg });
     this.model = motorModel(deps.profile);
     this.est = new PoseEstimator(this.model, { markerAheadCm: settings.markerAheadCm, cmdLatencyMs: settings.cmdLatencyMs });
+    this.profile = buildSpeedProfile(this.plan, settings.tuning, this.model, settings);
     this.follower = new Follower(this.plan, this.model, {
-      speedCmS: settings.speedCmS, curveSpeedCmS: settings.curveSpeedCmS, settleCm: settings.settleCm, spinCmd: settings.spinCmd,
-      spinLeadMs: settings.spinLeadMs, settleMs: settings.settleMs, afterSpinMs: settings.afterSpinMs,
+      speedCmS: settings.speedCmS, curveSpeedCmS: settings.curveSpeedCmS, settleCm: settings.tuning?.settleCm ?? settings.settleCm,
+      spinCmd: settings.spinCmd, spinLeadMs: settings.spinLeadMs, settleMs: settings.settleMs, afterSpinMs: settings.afterSpinMs,
+      // Without a tuning the follower keeps its constant speeds (as before tunings existed).
+      profile: settings.tuning ? this.profile : undefined,
     });
   }
 
@@ -213,10 +229,11 @@ export class AutoRun {
     this.state = 'running';
     this.t0 = now;
     this.est.reset(sp.pose, now, sp.from === 'camera' ? { cm: 2, deg: 8 } : { cm: 4, deg: 10 });
-    for (const s of this.plan.sectionStarts) this.sections.set(s.id, { id: s.id, tStart: NaN, tEnd: NaN, maxE: 0, sumE: 0, n: 0, fixes: 0 });
+    for (const s of this.plan.sectionStarts) this.sections.set(s.id, { id: s.id, tStart: NaN, tEnd: NaN, maxE: 0, sumE: 0, n: 0, fixes: 0, lineEvents: 0 });
     logger.log('auto.start', {
       route: this.route.name, style: this.settings.style, lengthCm: r1(this.plan.lengthCm), legs: this.plan.legs.length,
-      settings: { ...this.settings, route: this.settings.route ? this.route : undefined },
+      settings: { ...this.settings, route: this.settings.route ? this.route : undefined, tuningPrev: undefined, raceTuning: undefined },
+      profile: { predictedS: this.profile.predictedS, sections: this.profile.sections },
       start: { ...sp, pose: { x: r1(sp.pose.x), y: r1(sp.pose.y), headingDeg: sp.pose.headingDeg }, distCm: r1(sp.distCm) },
       model: { a: r1(this.model.a * 100) / 100, b: r1(this.model.b), deadband: this.model.deadband, trim: this.model.trim, trimTable: this.model.trimTable, trackWidthCm: this.model.trackWidthCm, source: this.model.source },
       plan: this.plan.legs.map((l) => (l.kind === 'spin'
@@ -270,9 +287,11 @@ export class AutoRun {
       this.lineBlack = 0;
       return;
     }
+    const sec = step ? this.sections.get(step.section) : undefined;
     if (code === 3) {
       this.lineBlack++;
       this.lineEvents++;
+      if (sec) sec.lineEvents++;
       if (this.lineBlack >= 3) this.stop('left the lane (both line sensors black)');
       return;
     }
@@ -280,6 +299,7 @@ export class AutoRun {
     if (code === 1 || code === 2) {
       // One sensor off the band: steer back towards the other side for a moment.
       this.lineEvents++;
+      if (sec) sec.lineEvents++;
       this.nudge = { k: code === 1 ? -0.03 : 0.03, until: t + 300 };
     }
   }
@@ -374,8 +394,9 @@ export class AutoRun {
     const summary: AutoSummary = {
       reason, finished, timeMs: Math.round(t - this.t0), progressCm: r1(finished ? this.plan.lengthCm : this.follower.progress),
       lengthCm: r1(this.plan.lengthCm), style: this.settings.style, speedCmS: this.settings.speedCmS,
+      tuning: this.settings.tuning?.label, predictedS: this.profile.predictedS,
       sections: [...this.sections.values()].filter((s) => !Number.isNaN(s.tStart)).map((s) => ({
-        id: s.id, timeMs: Math.round(s.tEnd - s.tStart), maxErrCm: r1(s.maxE), meanErrCm: r1(s.n ? s.sumE / s.n : 0), fixes: s.fixes,
+        id: s.id, timeMs: Math.round(s.tEnd - s.tStart), maxErrCm: r1(s.maxE), meanErrCm: r1(s.n ? s.sumE / s.n : 0), fixes: s.fixes, lineEvents: s.lineEvents,
       })),
       fixes: { total: this.est.stats.fixes, used: this.est.stats.used, rejected: this.est.stats.rejected, resets: this.est.stats.resets },
       lineEvents: this.lineEvents,

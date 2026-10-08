@@ -29,6 +29,12 @@ export type FollowerOpts = {
   slowBeforeSpinCm: number;
   /** How far ahead the path's curvature is read, cm. */
   lookaheadCm: number;
+  /**
+   * Target speed along the plan (speedProfile.ts, from a lap tuning). When
+   * set it replaces speedCmS and curveSpeedCmS; read a little ahead, by the
+   * distance the robot covers while a new speed takes effect.
+   */
+  profile?: { at(s: number): number };
 };
 
 export const DEFAULT_FOLLOWER_OPTS: FollowerOpts = {
@@ -139,17 +145,18 @@ export class Follower {
     const coast = (Math.max(0, (pose.vl + pose.vr) / 2) * (m.tauMs + 30)) / 1000;
     if (toEnd <= (nextLeg?.kind === 'spin' ? coast : 0.5) || (best >= n - 1 && along >= 0)) return null;
 
-    // Speed: the set speed, the curve limit, slower before a spin. In a curve
-    // the inner wheel must keep turning, so a tight curve needs some speed:
-    // look a little ahead so the robot is up to it on the way in.
+    // Speed: the set speed (or the tuning's profile), the curve limit, slower
+    // before a spin. In a curve the inner wheel must keep turning, so a tight
+    // curve needs some speed: look a little ahead so the robot is up to it on
+    // the way in.
     const ahead = pts[Math.min(n - 1, best + Math.round(o.lookaheadCm))];
     const kFf = ahead.curv;
     const vMin = Math.max(minWheelSpeed(m, 'L'), minWheelSpeed(m, 'R'));
     let kMax = 0;
     for (let i = best; i < Math.min(n, best + 12); i++) kMax = Math.max(kMax, Math.abs(pts[i].curv));
-    let v = o.speedCmS;
+    let v = o.profile ? o.profile.at(q.s + along + coast) : o.speedCmS;
     if (kMax > 0.01) {
-      v = Math.min(v, o.curveSpeedCmS);
+      if (!o.profile) v = Math.min(v, o.curveSpeedCmS);
       const ratio = 1 - (m.trackWidthCm * kMax) / 2;
       if (ratio > 0.05) v = Math.max(v, vMin / ratio);
     }

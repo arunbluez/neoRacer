@@ -31,8 +31,9 @@ both black (off the lane) stops the run.
 4. Pick the speed (start at the slowest, 22 cm/s; turns follow the lane's curves, or pick
    **Spin on the spot**), tap **Full screen**, then **Start**. STOP (or the header's STOP, or
    leaving the app) stops it.
-5. After the run: the summary shows the time and how far off the route each section was. Export
-   the logs (**Export logs**) and send them over: the route and the tuning get corrected from them.
+5. After the run: the summary shows the time and how far off the route each section was. Then
+   make the next lap faster with **Lap tuning** (below), or export the logs (**Export logs**) and
+   send them over: the route and the tuning get corrected from them.
 
 What the app does each frame: marks the lane-coloured pixels (blue → purple → pink), and fits the
 known lane to their edges (a robust homography fit that only matches an edge with the lane on the
@@ -52,6 +53,44 @@ search circle, phone position), `auto.line`, `auto.spin`, `auto.end` (summary) a
 result (`app` event `auto.blink`). `report.md` gets an "Auto runs" section, and each run saves the
 camera frame and a 1 cm/px top-down picture of the mat at its start and end into the session's
 images.
+
+## Lap tuning and the race engineer
+
+Instead of one speed for the whole lap, a **lap tuning** sets each section's speed on its
+straights and in its turns, how fast the speed may rise (acceleration) and fall (braking, so the
+robot slows down before a turn in time), and a grip limit for turns. A speed profile
+(`race/speedProfile.ts`) turns it into a target speed at every point of the route, the way
+lap-time simulators do (a forward pass for acceleration, a backward one for braking), keeping
+the physical limits: nothing below the deadband speed, tight turns fast enough for the inner wheel
+to keep turning (~35 cm/s in the 13 cm hairpins). It also predicts the lap time (in the simulator
+within ~1 %).
+
+The Auto screen's **Lap tuning** card shows the tuning in use, the predicted time per section and
+the runs of this session (time, prediction, worst distance off the path, line sensor events).
+After a lap there are two ways to the next tuning; either way the changes are shown first and
+apply only on **Apply**, **Undo** goes back one step, and no number can rise by more than 25 % in
+one step (lowering is always allowed):
+
+- **Quick tune**: rules, on the phone, offline (`race/learner.ts`). Parts of sections the robot
+  drove cleanly (within 4 cm, no line events) get faster (straights ×1.15, turns ×1.08); parts
+  where it wandered stay; where it went past 7.5 cm or a line sensor fired they get slower, and
+  where it left the lane clearly slower, with earlier braking.
+- **The race engineer**: Claude reads the runs and sets the next tuning, with reasons and what to
+  watch on the next lap. On a laptop with Claude Code signed in (your subscription), **Send runs to
+  the engineer** (the session zip, via the share sheet), then `npm run engineer -- <the zip>` in
+  [`engineer/`](engineer/README.md); it writes `engineer-plan-….json`. Get that to the phone
+  (AirDrop, Nearby Share, a message) and **Load plan**, or paste its text with **Paste plan**.
+  Without a laptop: **Copy brief for the Claude app**, paste it into the Claude app, and paste its
+  answer back with **Paste plan**.
+
+Claude never drives: it runs between laps, on the logs. Its plan goes through the same checks as
+a quick tune (limits, 25 % step), and track code edits it suggests (straight lengths, turn radii,
+at most 15 % or 15 cm) apply only if ticked. For the final's single timed attempt, **Keep for the
+race** saves the tuning with its best clean lap, and **Use race tuning** brings it back.
+
+Every run logs the tuning it drove and its prediction (`auto.start`), and the summary has line
+events per section, so the analysis (`race/lapAnalysis.ts`) can split every section into its
+straights and its turns.
 
 ## Run it
 
@@ -168,6 +207,7 @@ src/core/       portable TypeScript: no DOM, no React (moves to React Native unc
 src/adapters/   platform code: Web Bluetooth, mock transport, Dexie, dev sync, cameras
                 (getUserMedia, simulated, tracking worker), device, share/download
 src/ui/         React screens and components
+engineer/       the race engineer on a laptop: session zip → analysis → Claude (Agent SDK) → plan
 vite-plugins/   dev-only /__log and /__artifact endpoints
 ```
 

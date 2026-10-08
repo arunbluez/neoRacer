@@ -94,6 +94,8 @@ export type PathPt = {
   /** 1/cm, positive = turning right. */
   curv: number;
   section: string;
+  /** On one of the route's turns (arc style), not a straight. */
+  turn?: boolean;
 };
 
 export type Leg =
@@ -121,8 +123,14 @@ export function wrapDeg(a: number): number {
   return r + 0;
 }
 
-/** Cosine-ramped sideways offset along a straight (ramps of `rampCm` outside each range). */
-export function offsetAt(offsets: OffsetRange[] | undefined, d: number, rampCm = 15): number {
+/**
+ * Cosine-ramped sideways offset along a straight (ramps of `rampCm` outside
+ * each range). 25 cm: the swap from one side to the other between the cones
+ * of section c (6 cm across) stays a gentle bend; with 15 cm ramps it was
+ * curved like a 10 cm radius turn, and the follower sped up to ~40 cm/s there
+ * to keep the inner wheel turning.
+ */
+export function offsetAt(offsets: OffsetRange[] | undefined, d: number, rampCm = 25): number {
   if (!offsets) return 0;
   let o = 0;
   for (const r of offsets) {
@@ -235,7 +243,7 @@ export function buildPlan(spec: RouteSpec, style: TurnStyle, popts: PlanOpts = {
     for (let i = 1; i <= n; i++) {
       const a = a0 + (sweep * i) / n;
       c.s += (Math.abs(sweep) * r) / n;
-      push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a), s: c.s, headingDeg: wrapDeg(c.h + (deg * i) / n), curv: sgn / r, section });
+      push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a), s: c.s, headingDeg: wrapDeg(c.h + (deg * i) / n), curv: sgn / r, section, turn: true });
     }
     c.x = cx + r * Math.cos(a0 + sweep);
     c.y = cy + r * Math.sin(a0 + sweep);
