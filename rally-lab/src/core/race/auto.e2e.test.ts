@@ -11,7 +11,6 @@ import { makeSyntheticTrack, nearestOnPath, paintedRoute, pathLengths } from '..
 import { defaultMarkerColor } from '../vision/color';
 import { HandheldTracker } from '../vision/handheld';
 import { laneModel } from '../vision/laneFit';
-import { markerAheadFor } from '../model/lightShow';
 import { AutoRun, DEFAULT_AUTO_SETTINGS, trackingGate, type AutoSettings } from './autoRun';
 import { analyzeRuns } from './lapAnalysis';
 import { quickTune } from './learner';
@@ -39,8 +38,6 @@ async function lap(settings: Partial<AutoSettings>, camera = true, hooks: Hooks 
   if (hooks.profile) await lab.updateProfile(hooks.profile);
   else if (!hooks.uncalibrated) await lab.updateProfile(PUGUZ_PROFILE);
   const s: AutoSettings = { ...DEFAULT_AUTO_SETTINGS, ...settings };
-  // LIGHTS=1: with the turn signals and brake lights on during the run (experimental).
-  if (process.env.LIGHTS) await lab.setSettings({ lights: { show: true, inAuto: true } });
   const auto = lab.createAuto(s);
   AutoRun.lightsOn(lab.link, s);
   const tracker = new HandheldTracker({ model, marker: defaultMarkerColor(s.lightColor), minAreaPx: 3, markerHeightCm: s.markerHeightCm });
@@ -72,8 +69,6 @@ async function lap(settings: Partial<AutoSettings>, camera = true, hooks: Hooks 
     frames++;
     if (out.fix) {
       fixes++;
-      // As the app does: while headlights signal, the light centre sits further back.
-      if (lab.lights.kind === 'auto') out.fix.aheadCm = markerAheadFor(lab.lights.markerHeadlightsAt(out.fix.t), s.markerAheadCm);
       auto.onFix(out.fix);
     }
   }, 66);
@@ -160,18 +155,6 @@ describe('camera-assisted auto run (simulated)', () => {
         w.params.rightFactor = t0 >= 0 && ms - t0 < 700 ? 2.2 : PUGUZ_SIM.rightFactor!;
       },
     });
-    if (process.env.DUMP2) {
-      const t0 = events.find((e) => e.k === 'auto.start')!.t;
-      const recs = events.filter((e) => e.k === 'auto.recover'); const firstRec = recs[Number(process.env.DUMP2) - 1];
-      const tr = firstRec ? firstRec.t : Infinity;
-      for (const e of events) {
-        if (e.t < tr - 2500 || e.t > tr + 300) continue;
-        if (e.k === 'ble.tx' && (e.ch === 'light')) console.log(Math.round(e.t - t0), 'LIGHT', e.cmd);
-        if (e.k === 'auto.fix') console.log(Math.round(e.t - t0), 'fix', e.x, e.y, 'd', e.dx, e.dy, e.used, e.why);
-        if (e.k === 'auto.tick') console.log(Math.round(e.t - t0), 'tick', e.s, e.sec, 'e', e.e, 'x', e.x, e.y);
-        if (e.k === 'auto.recover') console.log(Math.round(e.t - t0), 'RECOVER', e.why);
-      }
-    }
     if (process.env.DUMP) console.log('lane', JSON.stringify(summary.recoveries), JSON.stringify(events.filter((e) => ['auto.recover', 'auto.recovered'].includes(e.k))), summary.edgeFixes, summary.timeMs);
     const kinds = events.map((e) => e.k);
     expect(kinds).toContain('auto.recover');

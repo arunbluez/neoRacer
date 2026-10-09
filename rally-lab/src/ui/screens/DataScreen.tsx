@@ -264,10 +264,6 @@ function SettingsPanel() {
           <input type="checkbox" checked={s.lights.show} onChange={(e) => set({ lights: { ...s.lights, show: e.target.checked } })} />
           <span><b>Light show</b> — turn signals, brake and reverse lights, underglow by speed while driving; start lights and a finish show around auto runs</span>
         </label>
-        <label className="row" style={{ marginBottom: 10, flexWrap: 'nowrap' }}>
-          <input type="checkbox" checked={s.lights.inAuto} onChange={(e) => set({ lights: { ...s.lights, inAuto: e.target.checked } })} />
-          <span><b>Signals during auto runs</b> (experimental) — the headlights signal turns and braking while the camera follows the underglow; in the simulator this made tracking worse</span>
-        </label>
         <label className="row" style={{ marginBottom: 12 }}>
           <input type="checkbox" checked={s.labTools} onChange={(e) => set({ labTools: e.target.checked })} />
           <span><b>Lab tools</b> — show Monitor, Console, Tests and Camera (calibrated tripod tracking) in the tab bar</span>

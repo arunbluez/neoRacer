@@ -231,14 +231,12 @@ export class Follower {
     // Not in the middle of a spin.
     if (this.leg?.kind !== 'path') return;
     const s0 = this.progress;
-    // Nearest, but favouring points near where it was along the route: in the zigzag the next
-    // lane is only 25 cm away, and a robot off its own lane can be nearer to that one.
     let best = { leg: -1, idx: 0, d: Infinity };
     this.plan.legs.forEach((leg, li) => {
       if (leg.kind !== 'path') return;
       leg.pts.forEach((p, i) => {
         if (p.s < s0 - backCm || p.s > s0 + 40) return;
-        const d = Math.hypot(p.x - pose.x, p.y - pose.y) + 0.35 * Math.abs(p.s - s0);
+        const d = (p.x - pose.x) ** 2 + (p.y - pose.y) ** 2;
         if (d < best.d) best = { leg: li, idx: i, d };
       });
     });

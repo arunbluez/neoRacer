@@ -28,8 +28,6 @@ export type HandheldConfig = {
 };
 
 export type CamFix = {
-  /** Where this light centre is ahead of the axle, cm (set by the app while headlights signal). */
-  aheadCm?: number;
   /** Frame capture time, ms. */
   t: number;
   /** The marker's ground point, mat cm (parallax corrected). */

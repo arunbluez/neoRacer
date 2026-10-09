@@ -43,6 +43,8 @@ export function RaceApp() {
   const [pasteText, setPasteText] = useState('');
   const [runs, setRuns] = useState<RunAnalysis[]>([]);
   const [flash, setFlash] = useState(0);
+  /** Recoveries in the run going now (counted here: the run reports them at the end). */
+  const [recN, setRecN] = useState(0);
   const camCell = useRef<HTMLDivElement>(null);
   const prev = useRef<{ recovering?: string; holding: boolean; summary?: unknown }>({ holding: false });
 
@@ -69,11 +71,15 @@ export function RaceApp() {
   const recovering = live?.recovering, holding = !!live?.holding;
   useEffect(() => {
     const p = prev.current;
-    if (recovering && !p.recovering) vibrate([30, 40, 30]);
+    if (recovering && !p.recovering) {
+      vibrate([30, 40, 30]);
+      setRecN((n) => n + 1);
+    }
     if (holding && !p.holding) vibrate([20, 30, 20, 30, 20]);
     if (sum && sum !== p.summary && sum.finished) setFlash((n) => n + 1);
     prev.current = { recovering, holding, summary: sum };
   }, [recovering, holding, sum]);
+  useEffect(() => setRecN(0), [auto]);
 
   const act = async (name: string, fn: () => Promise<unknown>) => {
     setBusy(name);
@@ -262,7 +268,7 @@ export function RaceApp() {
           <div className="rx-sub">
             <span>BEST <b>{Number.isFinite(best) ? `${secs(best)} s` : '—'}</b></span>
             {sum && !running && <span>RECOV <b>{sum.recoveries?.length ?? 0}</b></span>}
-            {running && <span>RECOV <b>{live!.recoveries}</b></span>}
+            {running && <span>RECOV <b>{recN}</b></span>}
           </div>
         </div>
         <div className="rx-rule" />

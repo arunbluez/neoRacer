@@ -110,9 +110,8 @@ browser won't let the app read the clipboard, a box opens to paste into.
   orange → pink) and, standing still, by the link's health (green, amber, red).
 - **Auto runs**: Formula 1 start lights (four red lights on the robot come on one by one, then all
   out: go) and a colour show at the finish; during the run all four lights stay the marker colour
-  so the camera keeps the robot. Signals during the run are an experimental setting: the camera
-  then follows the underglow and the headlights signal, but in the simulator that made tracking
-  worse.
+  so the camera keeps the robot. Turning the light show off (Data → Settings) skips the start
+  lights too.
 - **Gamepad** (Drive tab): a Bluetooth or USB gamepad shows up as a mode: left stick (or the
   triggers) drives, a stick steers, A sounds the horn, B stops; it rumbles when the line sensors
   leave the lane.

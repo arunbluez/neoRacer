@@ -247,3 +247,13 @@
 - The plan steps shared by the Lap tuning card and the race view live in `ui/race/engineerFlow.ts`.
 - Layout: the stop reason sits on the camera tag; Save shares a row with Reset after a finished
   lap; tighter side column on short (360–390 px) landscape phones.
+
+## Drive code back to the 36 s lap version (2026-10-09)
+
+- The auto run, follower, estimator and camera tracker (`core/race`, `core/vision`) are again
+  exactly as in c25722b, the version that drove the 36 s lap: the route pick-up after a recovery
+  is the plain nearest point again, and the per-fix light-centre offset is gone.
+- Signals during auto runs (experimental) removed: during a run the lights stay the marker
+  colour, and nothing light-related runs. The light show is for manual driving, plus the start
+  lights before and the finish show after a run.
+

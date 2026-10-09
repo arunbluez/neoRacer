@@ -7,7 +7,6 @@
 // of each run.
 
 import { encodeImage } from '../../adapters/camera/imageIo';
-import { markerAheadFor } from '../../core/model/lightShow';
 import type { Rgb } from '../../core/protocol/commands';
 import { addSavedLap, applySavedLap, makeSavedLap } from '../../core/race/savedLaps';
 import type { SavedLap } from '../../core/settings';
@@ -160,8 +159,6 @@ class AutoController {
       this.latestFix = out.fix;
       this.trail.push({ x: out.fix.x, y: out.fix.y, t: out.fix.t });
       if (this.trail.length > 400) this.trail.splice(0, 100);
-      // While headlights signal (amber, red) the camera sees the light centre further back.
-      if (lab.lights.kind === 'auto') out.fix.aheadCm = markerAheadFor(lab.lights.markerHeadlightsAt(out.fix.t), this.settings.markerAheadCm);
       auto?.onFix(out.fix);
     }
     if (auto?.state === 'running') {

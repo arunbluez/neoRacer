@@ -116,7 +116,8 @@ export class Lab {
   private lightMode(): LightMode {
     const l = this.settings.lights;
     if (!this.link.connected || !l.show || this.runner.running) return { kind: 'off' };
-    if (this.auto?.state === 'running') return l.inAuto ? { kind: 'auto', marker: this.settings.auto.lightColor } : { kind: 'off' };
+    // Auto runs: the lights stay the marker colour the camera follows.
+    if (this.auto?.state === 'running') return { kind: 'off' };
     return this.driving ? { kind: 'drive' } : { kind: 'off' };
   }
 
@@ -124,11 +125,10 @@ export class Lab {
     const now = this.deps.clock.now();
     const was = this.lights.kind;
     const mode = this.lightMode();
-    this.lights.setMode(mode, now);
+    this.lights.setMode(mode);
     // After a run or driving: back to the marker colour, so the camera can find the robot again.
     if (was !== 'off' && mode.kind === 'off' && this.link.connected) AutoRun.lightsOn(this.link, this.settings.auto);
     this.lights.rttMs = this.link.snapshot().rttMed ?? null;
-    if (this.auto?.state === 'running') this.lights.intent = this.auto.lightIntent();
     this.lights.tick(now);
   }
 

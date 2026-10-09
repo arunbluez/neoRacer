@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AMBER, BRAKE_RED, healthColor, lightFrame, LightShow, markerAheadFor, speedColor } from './lightShow';
-
-const GREEN = { r: 0, g: 255, b: 0 };
+import { AMBER, BRAKE_RED, healthColor, lightFrame, LightShow, speedColor } from './lightShow';
 
 describe('light show', () => {
   it('signals the side it turns to, blinking, when driving', () => {
@@ -24,20 +22,14 @@ describe('light show', () => {
     expect(idle.ug).toEqual(healthColor(300));
   });
 
-  it('keeps the underglow in the marker colour during an auto run', () => {
-    const f = lightFrame({ mode: { kind: 'auto', marker: GREEN }, t: 0, l: 0, r: 0, braking: false, rttMs: 30, blinkMs: 500, intent: { signal: 'R', brake: false, reverse: false } })!;
-    expect(f.ug).toEqual(GREEN);
-    expect(f.hlR).toEqual(AMBER);
-    expect(f.hlL).toEqual(GREEN);
-    expect(markerAheadFor(2, 3)).toBeCloseTo(3);
-    expect(markerAheadFor(1, 3)).toBeCloseTo(2);
-    expect(markerAheadFor(0, 3)).toBe(0);
+  it('shows nothing when off (auto runs keep the marker colour)', () => {
+    expect(lightFrame({ mode: { kind: 'off' }, t: 0, l: 30, r: 10, braking: false, rttMs: 30, blinkMs: 500 })).toBeNull();
   });
 
   it('sends only what changed, one command at a time, and lights the brakes on a slow-down', () => {
     const sent: string[] = [];
     const show = new LightShow((c) => sent.push(c));
-    show.setMode({ kind: 'drive' }, 0);
+    show.setMode({ kind: 'drive' });
     show.setMotor(40, 40, 0);
     for (let t = 0; t <= 400; t += 60) show.tick(t);
     expect(sent).toEqual(['HL,255,255,255', `UG,${Object.values(speedColor(40)).join(',')}`]);

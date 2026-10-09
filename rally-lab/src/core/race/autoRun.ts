@@ -18,7 +18,6 @@ import { minWheelSpeed, motorModel, spinRateDegS, wheelCommand, wheelSpeed, type
 import { buildPlan, RALLY_ROUTE, withoutOffsets, wrapDeg, type PathPt, type Plan, type RouteSpec, type TurnStyle } from './route';
 import { buildSpeedProfile, type SpeedProfile } from './speedProfile';
 import type { Tuning } from './tuning';
-import type { LightIntent } from '../model/lightShow';
 
 export type AutoSettings = {
   style: TurnStyle;
@@ -146,11 +145,7 @@ export function trackingGate(o: {
   return { center: { x: st.x + o.markerAheadCm * Math.cos(th), y: st.y + o.markerAheadCm * Math.sin(th) }, radiusCm: 30, why: 'start' };
 }
 
-export type CamFixIn = {
-  t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number; raw?: { x: number; y: number }; conf?: number;
-  /** Where this light centre is ahead of the axle, cm (default: markerAheadCm; less while headlights signal). */
-  aheadCm?: number;
-};
+export type CamFixIn = { t: number; x: number; y: number; headingDeg: number | null; cmPerPx: number; raw?: { x: number; y: number }; conf?: number };
 
 export type SectionStats = { id: string; tStart: number; tEnd: number; maxE: number; sumE: number; n: number; fixes: number; lineEvents: number };
 
@@ -193,8 +188,6 @@ export type AutoLive = {
   heldMs: number;
   /** Backing up and finding its way again. */
   recovering?: string;
-  /** Recoveries so far this run. */
-  recoveries: number;
 };
 
 
@@ -573,39 +566,6 @@ export class AutoRun {
     this.recent = [];
   }
 
-  /**
-   * What the run is doing, for its lights: the route's turn coming up (turn
-   * signal), slowing down or standing (brake lights), backing up (reverse).
-   */
-  lightIntent(): LightIntent {
-    const off: LightIntent = { signal: null, brake: false, reverse: false };
-    if (this.state !== 'running') return off;
-    const rec = this.rec;
-    if (rec) return { signal: null, brake: rec.phase !== 'back' && rec.phase !== 'turn', reverse: rec.phase === 'back' };
-    if (this.holdSince !== null) return { ...off, brake: true };
-    const step = this.lastStep;
-    if (!step) return off;
-    if (step.kind === 'spin') {
-      const leg = this.plan.legs[step.leg];
-      const side = leg?.kind === 'spin' ? (leg.deltaDeg > 0 ? 'R' : 'L') : null;
-      return { signal: step.phase === 'turn' ? side : null, brake: step.phase !== 'turn', reverse: false };
-    }
-    // A turn of the route here or within 15 cm (not the gentle bends around the cones).
-    let signal: 'L' | 'R' | null = null;
-    for (const p of this.plan.outline) {
-      if (p.s < step.s) continue;
-      if (p.s > step.s + 15) break;
-      if (p.turn) {
-        signal = p.curv > 0 ? 'R' : 'L';
-        break;
-      }
-    }
-    // Braking: the target speed falls clearly within the next 20 cm.
-    const vNow = step.v, vAhead = this.profile.at(step.s + 20);
-    const brake = !!this.settings.tuning && vAhead < vNow - 5;
-    return { signal, brake, reverse: false };
-  }
-
   /** Our robot was found at pos (blinking): carry on from there. */
   placeAt(pos: { x: number; y: number }, now: number): void {
     if (this.state !== 'running') return;
@@ -817,7 +777,7 @@ export class AutoRun {
       running: this.state === 'running', t: t - this.t0, pose: this.est.pose, step: this.lastStep,
       lastFixAgeMs: t - this.lastFixT, progress: this.follower.progress, lengthCm: this.plan.lengthCm,
       section: this.lastStep?.section ?? this.plan.legs[0]?.section ?? '', reason: this.summary?.reason, holding: this.holdSince !== null,
-      heldMs: this.holdSince !== null ? t - this.holdSince : 0, recovering: this.rec?.why, recoveries: this.recoveries.length,
+      heldMs: this.holdSince !== null ? t - this.holdSince : 0, recovering: this.rec?.why,
     };
   }
 }

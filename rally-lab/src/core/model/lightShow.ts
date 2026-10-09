@@ -2,27 +2,19 @@
 // side it turns to, red when it brakes or reverses, and underglow that
 // follows the speed (or shows the link's health when it stands still).
 //
-// Two modes. 'drive' (manual driving): everything, worked out from the wheel
-// commands, turn signals blinking. 'auto' (a camera-assisted run): the run
-// says what it is doing (a turn of the route coming up, braking, backing up)
-// so the lights change a couple of times per turn, not with every steering
-// correction (each light command takes Bluetooth time from the motors). The
-// camera tracks the robot by its marker colour, so the underglow always
-// stays that colour and only the headlights signal, steadily. The camera's
-// fix then sits where the marker-coloured lights are: see markerHeadlightsAt
-// (the tracker shifts its idea of the light centre).
+// Manual driving only ('drive'), worked out from the wheel commands. During
+// auto runs the lights stay the marker colour the camera tracks the robot by
+// (the start lights and finish show happen before and after, see
+// ui/race/autoController).
 //
 // Light commands are only sent when something changes, at most one every
 // minGapMs, most important first (brake/reverse, signals, underglow).
 
 import type { Rgb } from '../protocol/commands';
 
-export type LightMode = { kind: 'off' } | { kind: 'drive' } | { kind: 'auto'; marker: Rgb };
+export type LightMode = { kind: 'off' } | { kind: 'drive' };
 
 export type LightState = { hlL: Rgb; hlR: Rgb; ug: Rgb };
-
-/** What an auto run is doing, for its lights. */
-export type LightIntent = { signal: 'L' | 'R' | null; brake: boolean; reverse: boolean };
 
 export const AMBER: Rgb = { r: 255, g: 140, b: 0 };
 export const BRAKE_RED: Rgb = { r: 255, g: 0, b: 0 };
@@ -40,9 +32,6 @@ export type LightShowOpts = {
 };
 
 export const DEFAULT_LIGHT_OPTS: LightShowOpts = { minGapMs: 130, blinkMs: 500, brakeHoldMs: 700 };
-
-/** Auto runs: fewer, calmer light commands. */
-const AUTO_MIN_GAP_MS = 250;
 
 const same = (a: Rgb, b: Rgb) => a.r === b.r && a.g === b.g && a.b === b.b;
 const cmd = (name: string, c: Rgb) => `${name},${c.r},${c.g},${c.b}`;
@@ -66,16 +55,9 @@ export function healthColor(rttMs: number | null): Rgb {
 
 /** What the lights should show at time t. */
 export function lightFrame(o: {
-  mode: LightMode; t: number; l: number; r: number; braking: boolean; rttMs: number | null; blinkMs: number; intent?: LightIntent;
+  mode: LightMode; t: number; l: number; r: number; braking: boolean; rttMs: number | null; blinkMs: number;
 }): LightState | null {
-  const { mode } = o;
-  if (mode.kind === 'off') return null;
-  if (mode.kind === 'auto') {
-    const base = mode.marker;
-    const it = o.intent ?? { signal: null, brake: false, reverse: false };
-    if (it.reverse || it.brake) return { hlL: BRAKE_RED, hlR: BRAKE_RED, ug: base };
-    return { hlL: it.signal === 'L' ? AMBER : base, hlR: it.signal === 'R' ? AMBER : base, ug: base };
-  }
+  if (o.mode.kind === 'off') return null;
   const v = (o.l + o.r) / 2;
   const diff = o.l - o.r; // > 0: left wheel faster, turning right
   const reversing = v < -2 || (o.l < 0 && o.r < 0);
@@ -100,11 +82,7 @@ export class LightShow {
   private sent: LightState | null = null;
   private lastSendT = -Infinity;
   private heldUntil = -Infinity;
-  /** When each headlight state took effect (for the camera): marker-coloured headlights count. */
-  private headLog: { t: number; n: number }[] = [{ t: -Infinity, n: 2 }];
   rttMs: number | null = null;
-  /** What the auto run is doing (auto mode). */
-  intent: LightIntent = { signal: null, brake: false, reverse: false };
   readonly opts: LightShowOpts;
 
   constructor(private readonly send: (cmd: string) => void, opts: Partial<LightShowOpts> = {}) {
@@ -116,11 +94,10 @@ export class LightShow {
   }
 
   /** Switch mode. The lights already showing are taken as unknown: the next tick sets them all. */
-  setMode(mode: LightMode, t: number): void {
-    if (JSON.stringify(mode) === JSON.stringify(this.mode)) return;
+  setMode(mode: LightMode): void {
+    if (mode.kind === this.mode.kind) return;
     this.mode = mode;
     this.sent = null;
-    if (mode.kind === 'auto') this.headLog.push({ t, n: 2 });
   }
 
   /** Someone else drives the lights for a while (the blink test): stay quiet, then set them all again. */
@@ -144,10 +121,10 @@ export class LightShow {
   tick(t: number): void {
     if (t < this.heldUntil) return;
     const want = lightFrame({
-      mode: this.mode, t, l: this.motor.l, r: this.motor.r, braking: t < this.brakeUntil, rttMs: this.rttMs, blinkMs: this.opts.blinkMs, intent: this.intent,
+      mode: this.mode, t, l: this.motor.l, r: this.motor.r, braking: t < this.brakeUntil, rttMs: this.rttMs, blinkMs: this.opts.blinkMs,
     });
     if (!want) return;
-    if (t - this.lastSendT < (this.mode.kind === 'auto' ? AUTO_MIN_GAP_MS : this.opts.minGapMs)) return;
+    if (t - this.lastSendT < this.opts.minGapMs) return;
     // What the robot shows (unknown after a mode change or a hold: everything is sent again).
     const unknown: Rgb = { r: -1, g: -1, b: -1 };
     const s: LightState = this.sent ?? { hlL: unknown, hlR: unknown, ug: unknown };
@@ -173,31 +150,5 @@ export class LightShow {
     this.sent = next;
     this.lastSendT = t;
     this.send(out);
-    if (this.mode.kind === 'auto') {
-      const m = this.mode.marker;
-      const n = (same(next.hlL, m) ? 1 : 0) + (same(next.hlR, m) ? 1 : 0);
-      if (n !== this.headLog[this.headLog.length - 1].n) this.headLog.push({ t, n });
-      if (this.headLog.length > 50) this.headLog.splice(1, 25);
-    }
   }
-
-  /**
-   * How many headlights showed the marker colour at time t (2 = both): the
-   * camera's light centre moves back towards the underglow with fewer. The
-   * robot takes ~80 ms to show a command.
-   */
-  markerHeadlightsAt(t: number): number {
-    for (let i = this.headLog.length - 1; i >= 0; i--) if (this.headLog[i].t + 80 <= t) return this.headLog[i].n;
-    return 2;
-  }
-}
-
-/**
- * Where the camera sees the light centre, ahead of the axle, with n of the
- * two headlights in the marker colour (the underglow always is): all four
- * lights average at `aheadAll`; the headlights are ~2× that ahead, the
- * underglow at the axle.
- */
-export function markerAheadFor(n: number, aheadAll: number): number {
-  return (aheadAll * 2 * n) / (2 + n);
 }
